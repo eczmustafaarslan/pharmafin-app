@@ -23,6 +23,20 @@
       }
     </style></head>
 <body>
+<script>
+/* Sayfa ilk açılırken, React daha hiç çizim yapmadan önce, kaydedilmiş
+   koyu tema tercihi varsa arka planı hemen o renge çeviriyoruz — böylece
+   koyu temayı seçmiş biri sayfayı her açtığında kısa bir "beyaz flaş"
+   görmüyor. */
+(function () {
+  try {
+    if (localStorage.getItem("ecz-theme") === "dark") {
+      document.documentElement.style.background = "#101C18";
+      document.body.style.background = "#101C18";
+    }
+  } catch (e) {}
+})();
+</script>
 <div id="root"></div>
 <script>
 /**
@@ -560,6 +574,30 @@ const CloudSync = p => /*#__PURE__*/React.createElement(IconBase, p, /*#__PURE__
 }), /*#__PURE__*/React.createElement("path", {
   d: "M10 13.5l1.6-1.6 1.6 1.6M11.6 12v5"
 }));
+const Sun = p => /*#__PURE__*/React.createElement(IconBase, p, /*#__PURE__*/React.createElement("circle", {
+  cx: "12",
+  cy: "12",
+  r: "4.2"
+}), /*#__PURE__*/React.createElement("path", {
+  d: "M12 2.5v2.4M12 19.1v2.4M4.6 4.6l1.7 1.7M17.7 17.7l1.7 1.7M2.5 12h2.4M19.1 12h2.4M4.6 19.4l1.7-1.7M17.7 6.3l1.7-1.7"
+}));
+const Moon = p => /*#__PURE__*/React.createElement(IconBase, p, /*#__PURE__*/React.createElement("path", {
+  d: "M20.2 14.6A8.4 8.4 0 1 1 9.4 3.8a6.7 6.7 0 0 0 10.8 10.8z"
+}));
+const ZoomOut = p => /*#__PURE__*/React.createElement(IconBase, p, /*#__PURE__*/React.createElement("circle", {
+  cx: "10.5",
+  cy: "10.5",
+  r: "6.5"
+}), /*#__PURE__*/React.createElement("path", {
+  d: "M20 20l-4.4-4.4M8 10.5h5"
+}));
+const ZoomIn = p => /*#__PURE__*/React.createElement(IconBase, p, /*#__PURE__*/React.createElement("circle", {
+  cx: "10.5",
+  cy: "10.5",
+  r: "6.5"
+}), /*#__PURE__*/React.createElement("path", {
+  d: "M20 20l-4.4-4.4M10.5 8v5M8 10.5h5"
+}));
 const Volume2 = p => /*#__PURE__*/React.createElement(IconBase, p, /*#__PURE__*/React.createElement("path", {
   d: "M4 9v6h4l5 4V5L8 9z"
 }), /*#__PURE__*/React.createElement("path", {
@@ -643,7 +681,7 @@ function MiniBarChart({
     }, d.label));
   }));
 }
-const C = {
+const LIGHT_PALETTE = {
   ink: "#1E4A3C",
   inkSoft: "#2C6350",
   accent: "#E7A83E",
@@ -661,6 +699,47 @@ const C = {
   muted: "#67807A",
   text: "#18302A"
 };
+const DARK_PALETTE = {
+  ink: "#6FDDB0",
+  inkSoft: "#57B693",
+  accent: "#F0B559",
+  accentSoft: "#3A2E16",
+  paper: "#101C18",
+  paperDark: "#0B1512",
+  card: "#182620",
+  red: "#F0736D",
+  redSoft: "#3A1F1E",
+  green: "#3ECB9B",
+  greenSoft: "#12352A",
+  amber: "#D99457",
+  amberSoft: "#3A2A18",
+  line: "#28382F",
+  muted: "#8AA69C",
+  text: "#EAF3EF"
+};
+/* Açık/koyu tema tercihi localStorage'da saklanır, sayfa yeniden
+   açıldığında hatırlanır. C bir Proxy: C.ink, C.card gibi kullanımların
+   hepsi olduğu gibi kalır, ama okuma anında ACTIVE_THEME'e bakıp doğru
+   paletten değer döner — böylece tema değişince uygulamanın onlarca
+   yerini tek tek güncellemek gerekmiyor. */
+let ACTIVE_THEME = (() => {
+  try {
+    return localStorage.getItem("ecz-theme") === "dark" ? "dark" : "light";
+  } catch {
+    return "light";
+  }
+})();
+const C = new Proxy(LIGHT_PALETTE, {
+  get(_target, key) {
+    return (ACTIVE_THEME === "dark" ? DARK_PALETTE : LIGHT_PALETTE)[key];
+  }
+});
+function setActiveTheme(theme) {
+  ACTIVE_THEME = theme === "dark" ? "dark" : "light";
+  try {
+    localStorage.setItem("ecz-theme", ACTIVE_THEME);
+  } catch {}
+}
 const uid = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const fmt = n => (Number(n) || 0).toLocaleString("tr-TR", {
   style: "currency",
@@ -1049,6 +1128,10 @@ function GlobalStyle() {
         font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Inter', 'Helvetica Neue', Arial, sans-serif;
         color: ${C.text};
         -webkit-font-smoothing: antialiased;
+        --ecz-line: ${C.line};
+        --ecz-text: ${C.text};
+        --ecz-paper: ${C.paper};
+        transition: background 0.2s ease, color 0.2s ease;
       }
       .ecz-display { font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', sans-serif; letter-spacing: -0.01em; }
       .ecz-mono { font-family: ui-monospace, 'SF Mono', 'Menlo', 'IBM Plex Mono', monospace; }
@@ -1060,7 +1143,7 @@ function GlobalStyle() {
       .ecz-topbar {
         backdrop-filter: saturate(180%) blur(20px);
         -webkit-backdrop-filter: saturate(180%) blur(20px);
-        background: rgba(255,255,255,0.78);
+        background: ${ACTIVE_THEME === "dark" ? "rgba(16,28,24,0.82)" : "rgba(255,255,255,0.78)"};
       }
     `);
 }
@@ -1155,14 +1238,19 @@ function Field({
     }
   }, label, children);
 }
+/* Not: bu nesne script yüklenirken BİR KEZ oluşturuluyor, bu yüzden
+   C.line/C.text/C.paper'ı doğrudan burada okumak değerleri o anki temaya
+   sabitler (tema sonradan değişince güncellenmez). Bunun yerine .ecz-root
+   üzerinde tanımlı, her render'da güncellenen CSS değişkenlerine
+   referans veriyoruz. */
 const inputStyle = {
-  border: `1px solid ${C.line}`,
+  border: "1px solid var(--ecz-line)",
   borderRadius: 6,
   padding: "8px 10px",
   fontSize: 13.5,
   fontFamily: "Inter, sans-serif",
-  color: C.text,
-  background: C.paper,
+  color: "var(--ecz-text)",
+  background: "var(--ecz-paper)",
   outline: "none"
 };
 
@@ -6394,6 +6482,42 @@ function App() {
     saveKey("ecz-sound-pref", !v);
     return !v;
   });
+  /* Açık/Koyu tema: ACTIVE_THEME modül seviyesinde tutuluyor (C onu okuyor),
+     theme state'i sadece değişince ekranın yeniden çizilmesini tetiklemek
+     için var. */
+  const [theme, setTheme] = useState(ACTIVE_THEME);
+  const toggleTheme = useCallback(() => {
+    setTheme(prev => {
+      const next = prev === "dark" ? "light" : "dark";
+      setActiveTheme(next);
+      return next;
+    });
+  }, []);
+  /* Yakınlaştırma: metin/arayüz bulanıklaşmadan büyüsün diye tarayıcının
+     kendi zoom'u yerine .ecz-root üzerinde CSS "zoom" kullanıyoruz (bu,
+     tıpkı gerçek bir çözünürlük değişimi gibi yeniden düzenler, resim gibi
+     büyütüp bulanıklaştırmaz). */
+  const ZOOM_STEPS = [90, 100, 110, 125, 150];
+  const [uiScale, setUiScale] = useState(100);
+  useEffect(() => {
+    loadKey("ecz-ui-scale", 100).then(v => setUiScale(ZOOM_STEPS.includes(v) ? v : 100));
+  }, []);
+  const zoomOut = useCallback(() => {
+    setUiScale(v => {
+      const i = ZOOM_STEPS.indexOf(v);
+      const next = i > 0 ? ZOOM_STEPS[i - 1] : ZOOM_STEPS[0];
+      saveKey("ecz-ui-scale", next);
+      return next;
+    });
+  }, []);
+  const zoomIn = useCallback(() => {
+    setUiScale(v => {
+      const i = ZOOM_STEPS.indexOf(v);
+      const next = i >= 0 && i < ZOOM_STEPS.length - 1 ? ZOOM_STEPS[i + 1] : ZOOM_STEPS[ZOOM_STEPS.length - 1];
+      saveKey("ecz-ui-scale", next);
+      return next;
+    });
+  }, []);
   const playChime = useCallback(() => {
     try {
       const Ctx = window.AudioContext || window.webkitAudioContext;
@@ -6489,7 +6613,8 @@ function App() {
     className: "ecz-root",
     style: {
       minHeight: "100vh",
-      background: C.paper
+      background: C.paper,
+      zoom: `${uiScale}%`
     }
   }, /*#__PURE__*/React.createElement(GlobalStyle, null), /*#__PURE__*/React.createElement("header", {
     className: "ecz-topbar",
@@ -6635,6 +6760,84 @@ function App() {
   }) : /*#__PURE__*/React.createElement(VolumeX, {
     size: 15,
     color: C.muted,
+    strokeWidth: 2
+  })), /*#__PURE__*/React.createElement("div", {
+    title: "Arayüz boyutu",
+    style: {
+      display: "flex",
+      alignItems: "center",
+      height: 34,
+      borderRadius: 17,
+      border: `1px solid ${C.line}`,
+      background: C.card,
+      overflow: "hidden"
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    onClick: zoomOut,
+    disabled: uiScale === ZOOM_STEPS[0],
+    title: "Küçült",
+    style: {
+      width: 30,
+      height: 34,
+      border: "none",
+      background: "transparent",
+      cursor: uiScale === ZOOM_STEPS[0] ? "default" : "pointer",
+      opacity: uiScale === ZOOM_STEPS[0] ? 0.4 : 1,
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center"
+    }
+  }, /*#__PURE__*/React.createElement(ZoomOut, {
+    size: 14,
+    color: C.ink
+  })), /*#__PURE__*/React.createElement("span", {
+    className: "ecz-mono",
+    style: {
+      fontSize: 11,
+      fontWeight: 600,
+      color: C.muted,
+      minWidth: 34,
+      textAlign: "center"
+    }
+  }, `${uiScale}%`), /*#__PURE__*/React.createElement("button", {
+    onClick: zoomIn,
+    disabled: uiScale === ZOOM_STEPS[ZOOM_STEPS.length - 1],
+    title: "Büyüt",
+    style: {
+      width: 30,
+      height: 34,
+      border: "none",
+      background: "transparent",
+      cursor: uiScale === ZOOM_STEPS[ZOOM_STEPS.length - 1] ? "default" : "pointer",
+      opacity: uiScale === ZOOM_STEPS[ZOOM_STEPS.length - 1] ? 0.4 : 1,
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center"
+    }
+  }, /*#__PURE__*/React.createElement(ZoomIn, {
+    size: 14,
+    color: C.ink
+  }))), /*#__PURE__*/React.createElement("button", {
+    onClick: toggleTheme,
+    title: theme === "dark" ? "Açık temaya geç" : "Koyu temaya geç",
+    style: {
+      width: 34,
+      height: 34,
+      borderRadius: "50%",
+      border: `1px solid ${C.line}`,
+      background: C.card,
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      cursor: "pointer"
+    }
+  }, theme === "dark" ? /*#__PURE__*/React.createElement(Sun, {
+    size: 15,
+    color: C.accent,
+    strokeWidth: 2
+  }) : /*#__PURE__*/React.createElement(Moon, {
+    size: 15,
+    color: C.ink,
     strokeWidth: 2
   })), /*#__PURE__*/React.createElement("button", {
     onClick: () => setBellOpen(o => !o),

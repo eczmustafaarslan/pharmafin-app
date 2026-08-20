@@ -1,0 +1,78 @@
+name: Pharmafin Masaüstü Uygulamasını Derle
+
+# Bu iş akışı Pharmafin'i hem macOS (.dmg) hem Windows (.exe/.msi) için
+# imzasız (unsigned) olarak derler ve GitHub Releases üzerinden herkesin
+# indirebileceği bir bağlantı oluşturur. Apple/Microsoft imzalama ücreti
+# ödenmediği için macOS'ta "sağ tık > Aç", Windows'ta "Daha fazla bilgi >
+# Yine de çalıştır" ile açılması gerekir; bu normaldir.
+#
+# Nasıl çalıştırılır: GitHub'da bu depo > "Actions" sekmesi >
+# "Pharmafin Masaüstü Uygulamasını Derle" > sağdaki "Run workflow" düğmesi.
+# Her kod düzeltmesinden sonra bu düğmeye tekrar basman yeterli.
+
+on:
+  workflow_dispatch:
+    inputs:
+      surum:
+        description: "Sürüm etiketi (örn: v1.0.1)"
+        required: true
+        default: "v1.0.0"
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: "macos-latest"
+            label: "macOS"
+          - platform: "windows-latest"
+            label: "Windows"
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - name: Kodu indir
+        uses: actions/checkout@v4
+
+      - name: Node.js kur
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Rust kur
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: macOS için evrensel derleme hedeflerini ekle (Intel + Apple Silicon)
+        if: matrix.platform == 'macos-latest'
+        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+
+      - name: Rust derleme önbelleği
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+
+      - name: Frontend bağımlılıklarını kur
+        run: npm ci
+
+      - name: Pharmafin'i derle ve sürüme ekle
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.event.inputs.surum || github.ref_name }}
+          releaseName: "Pharmafin ${{ github.event.inputs.surum || github.ref_name }}"
+          releaseBody: |
+            Pharmafin masaüstü uygulaması.
+
+            - macOS: .dmg dosyasını indirip aç, uygulamayı Applications klasörüne sürükle.
+              İlk açılışta "doğrulanamayan geliştirici" uyarısı çıkarsa: uygulama simgesine
+              sağ tık > Aç > tekrar Aç.
+            - Windows: .msi (veya .exe) yükleyiciyi indirip çalıştır. "Windows bilgisayarınızı
+              korudu" uyarısı çıkarsa: Daha fazla bilgi > Yine de çalıştır.
+          releaseDraft: false
+          prerelease: false
+          args: ${{ matrix.platform == 'macos-latest' && '--target universal-apple-darwin' || '' }}

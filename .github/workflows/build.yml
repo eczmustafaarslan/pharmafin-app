@@ -1,5 +1,6 @@
 name: Pharmafin Masaüstü Uygulamasını Derle
-
+permissions:
+  contents: write
 # Bu iş akışı Pharmafin'i hem macOS (.dmg) hem Windows (.exe/.msi) için
 # imzasız (unsigned) olarak derler ve GitHub Releases üzerinden herkesin
 # indirebileceği bir bağlantı oluşturur. Apple/Microsoft imzalama ücreti

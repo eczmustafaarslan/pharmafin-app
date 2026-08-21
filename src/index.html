@@ -3172,9 +3172,68 @@ function CalisanMaaslari({
     });
   };
   const payments = transactions.filter(t => t.type === "gider" && t.giderTuru === "maas");
-  const paidThisMonthIds = new Set(payments.filter(p => p.month === todayStr().slice(0, 7)).map(p => p.employeeId));
+  const monthNow = todayStr().slice(0, 7);
+  const paidThisMonthByEmp = {};
+  payments.forEach(p => {
+    if (p.month === monthNow) {
+      paidThisMonthByEmp[p.employeeId] = (paidThisMonthByEmp[p.employeeId] || 0) + Number(p.amount);
+    }
+  });
   const totalPayroll = employees.reduce((s, e) => s + Number(e.salary || 0), 0);
   const totalPaid = payments.reduce((s, p) => s + Number(p.amount), 0);
+  const totalRemainingThisMonth = employees.reduce((s, e) => s + Math.max(0, Number(e.salary || 0) - (paidThisMonthByEmp[e.id] || 0)), 0);
+  const activeEmpObj = employees.find(e => e.id === activeEmp) || null;
+  const selMonthPaid = activeEmp ? payments.filter(p => p.employeeId === activeEmp && p.month === payForm.month && p.id !== editingPayId).reduce((s, p) => s + Number(p.amount), 0) : 0;
+  const selMonthRemaining = activeEmpObj ? Number(activeEmpObj.salary || 0) - selMonthPaid : 0;
+  const empAllPayments = activeEmp ? payments.filter(p => p.employeeId === activeEmp) : [];
+  const empMonthsSet = new Set(empAllPayments.map(p => p.month));
+  if (activeEmp) empMonthsSet.add(monthNow);
+  const monthlyBreakdown = [...empMonthsSet].sort((a, b) => b.localeCompare(a)).slice(0, 12).map(m => {
+    const paid = empAllPayments.filter(p => p.month === m).reduce((s, p) => s + Number(p.amount), 0);
+    const remain = Number(activeEmpObj?.salary || 0) - paid;
+    return {
+      month: m,
+      paid: paid,
+      remain: remain
+    };
+  });
+  const monthlyBreakdownEl = activeEmp && monthlyBreakdown.length > 0 ? /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: 18,
+      paddingTop: 14,
+      borderTop: `1px solid ${C.paperDark}`
+    }
+  }, /*#__PURE__*/React.createElement("h4", {
+    style: {
+      fontSize: 12.5,
+      fontWeight: 700,
+      color: C.muted,
+      margin: "0 0 8px",
+      textTransform: "uppercase",
+      letterSpacing: 0.4
+    }
+  }, "Aylık Özet"), monthlyBreakdown.map(row => /*#__PURE__*/React.createElement("div", {
+    key: row.month,
+    style: {
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center",
+      padding: "7px 0",
+      borderBottom: `1px solid ${C.paperDark}`,
+      fontSize: 12.5
+    }
+  }, /*#__PURE__*/React.createElement("span", null, row.month), /*#__PURE__*/React.createElement("span", {
+    className: "ecz-mono",
+    style: {
+      color: C.muted
+    }
+  }, "Ödenen: ", fmt(row.paid)), /*#__PURE__*/React.createElement("span", {
+    className: "ecz-mono",
+    style: {
+      fontWeight: 700,
+      color: row.remain > 0 ? C.red : C.green
+    }
+  }, row.remain > 0 ? `Kalan: ${fmt(row.remain)}` : row.remain < 0 ? `Fazla: ${fmt(Math.abs(row.remain))}` : "Tam ödendi")))) : null;
   const submitEmp = e => {
     e.preventDefault();
     if (!empForm.name || !empForm.salary) return;
@@ -3226,10 +3285,11 @@ function CalisanMaaslari({
         ...payload
       });
     }
+    const newRemaining = Number(emp?.salary || 0) - (selMonthPaid + Number(payForm.amount));
     setPayForm({
       date: todayStr(),
-      month: todayStr().slice(0, 7),
-      amount: emp?.salary || "",
+      month: payForm.month,
+      amount: newRemaining > 0 ? newRemaining : "",
       note: "",
       tags: [],
       paymentMethod: payForm.paymentMethod,
@@ -3261,6 +3321,11 @@ function CalisanMaaslari({
     label: "Toplam Ödenen Maaş",
     value: fmt(totalPaid),
     accent: C.red
+  }), /*#__PURE__*/React.createElement(KpiTicket, {
+    icon: Wallet,
+    label: "Bu Ay Kalan Bordro",
+    value: fmt(totalRemainingThisMonth),
+    accent: C.amber
   })), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
@@ -3373,15 +3438,19 @@ function CalisanMaaslari({
     }
   }, employees.map(emp => {
     const isActive = activeEmp === emp.id;
-    const paidThisMonth = paidThisMonthIds.has(emp.id);
+    const paidThisMonthAmount = paidThisMonthByEmp[emp.id] || 0;
+    const remainingThisMonth = Number(emp.salary || 0) - paidThisMonthAmount;
+    const payStatus = paidThisMonthAmount <= 0 ? "unpaid" : remainingThisMonth > 0 ? "partial" : "paid";
     return /*#__PURE__*/React.createElement("div", {
       key: emp.id,
       onClick: () => {
         setActiveEmp(emp.id);
         setEditingPayId(null);
+        const remain = Number(emp.salary || 0) - (paidThisMonthByEmp[emp.id] || 0);
         setPayForm(f => ({
           ...f,
-          amount: emp.salary
+          month: monthNow,
+          amount: remain > 0 ? remain : emp.salary
         }));
       },
       style: {
@@ -3450,7 +3519,14 @@ function CalisanMaaslari({
         fontSize: 13,
         fontWeight: 600
       }
-    }, fmt(emp.salary), " / ay"), /*#__PURE__*/React.createElement("span", {
+    }, fmt(emp.salary), " / ay"), payStatus === "partial" && /*#__PURE__*/React.createElement("div", {
+      className: "ecz-mono",
+      style: {
+        marginTop: 2,
+        fontSize: 11,
+        color: isActive ? "#ffffffcc" : C.red
+      }
+    }, "Kalan: ", fmt(remainingThisMonth)), /*#__PURE__*/React.createElement("span", {
       style: {
         display: "inline-block",
         marginTop: 6,
@@ -3458,10 +3534,10 @@ function CalisanMaaslari({
         fontWeight: 700,
         padding: "3px 8px",
         borderRadius: 20,
-        background: paidThisMonth ? isActive ? "rgba(255,255,255,0.92)" : C.greenSoft : isActive ? "rgba(0,0,0,0.32)" : C.redSoft,
-        color: paidThisMonth ? isActive ? C.green : C.green : isActive ? "#fff" : C.red
+        background: payStatus === "paid" ? isActive ? "rgba(255,255,255,0.92)" : C.greenSoft : payStatus === "partial" ? isActive ? "rgba(255,255,255,0.92)" : C.amberSoft : isActive ? "rgba(0,0,0,0.32)" : C.redSoft,
+        color: payStatus === "paid" ? C.green : payStatus === "partial" ? C.amber : isActive ? "#fff" : C.red
       }
-    }, paidThisMonth ? "Bu ay ödendi" : "Bu ay ödenmedi"));
+    }, payStatus === "paid" ? "Bu ay ödendi" : payStatus === "partial" ? "Bu ay kısmi ödendi" : "Bu ay ödenmedi"));
   })), /*#__PURE__*/React.createElement("div", {
     style: {
       background: C.card,
@@ -3480,7 +3556,30 @@ function CalisanMaaslari({
       margin: "0 0 12px",
       color: C.ink
     }
-  }, employees.find(e => e.id === activeEmp)?.name, " — Maaş Ödemeleri"), /*#__PURE__*/React.createElement("form", {
+  }, activeEmpObj?.name, " — Maaş Ödemeleri"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      flexWrap: "wrap",
+      gap: 16,
+      padding: "10px 14px",
+      background: C.paper,
+      borderRadius: 10,
+      fontSize: 12.5,
+      marginBottom: 14
+    }
+  }, /*#__PURE__*/React.createElement("span", null, payForm.month, " maaşı: ", /*#__PURE__*/React.createElement("b", {
+    className: "ecz-mono"
+  }, fmt(activeEmpObj?.salary || 0))), /*#__PURE__*/React.createElement("span", null, "Ödenen: ", /*#__PURE__*/React.createElement("b", {
+    className: "ecz-mono",
+    style: {
+      color: C.green
+    }
+  }, fmt(selMonthPaid))), /*#__PURE__*/React.createElement("span", null, selMonthRemaining > 0 ? "Kalan: " : selMonthRemaining < 0 ? "Fazla ödenen: " : "Durum: ", /*#__PURE__*/React.createElement("b", {
+    className: "ecz-mono",
+    style: {
+      color: selMonthRemaining > 0 ? C.red : C.green
+    }
+  }, selMonthRemaining !== 0 ? fmt(Math.abs(selMonthRemaining)) : "Tam ödendi"))), /*#__PURE__*/React.createElement("form", {
     onSubmit: submitPay,
     style: {
       display: "flex",
@@ -3655,7 +3754,7 @@ function CalisanMaaslari({
     }
   }, /*#__PURE__*/React.createElement(Trash2, {
     size: 13
-  }))))))))));
+  }))))), monthlyBreakdownEl)))));
 }
 function GiderlerView({
   transactions,

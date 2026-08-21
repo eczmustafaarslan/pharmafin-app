@@ -1789,6 +1789,7 @@ function HesaplarView({
   removeAccount,
   transactions,
   addTx,
+  editTx,
   removeTx,
   tags,
   addTag
@@ -1815,6 +1816,7 @@ function HesaplarView({
     setOpen(true);
   };
   const [activeAcc, setActiveAcc] = useState(null);
+  const [editingTxId, setEditingTxId] = useState(null);
   const [txForm, setTxForm] = useState({
     type: "gelir",
     date: todayStr(),
@@ -1823,6 +1825,18 @@ function HesaplarView({
     amount: "",
     tags: []
   });
+  const startEditTx = t => {
+    setEditingTxId(t.id);
+    setActiveAcc(t.accountId);
+    setTxForm({
+      type: t.type || "gelir",
+      date: t.date || todayStr(),
+      category: t.category || "",
+      description: t.description || "",
+      amount: t.amount ?? "",
+      tags: t.tags || []
+    });
+  };
   const balanceOf = acc => {
     const net = transactions.filter(t => t.accountId === acc.id).reduce((s, t) => s + (t.type === "gelir" ? Number(t.amount) : -Number(t.amount)), 0);
     return Number(acc.openingBalance || 0) + net;
@@ -1850,12 +1864,19 @@ function HesaplarView({
   const submitTx = e => {
     e.preventDefault();
     if (!activeAcc || !txForm.amount || !txForm.category) return;
-    addTx({
-      id: uid(),
+    const payload = {
       accountId: activeAcc,
       ...txForm,
       amount: Number(txForm.amount)
-    });
+    };
+    if (editingTxId) {
+      editTx(editingTxId, payload);
+    } else {
+      addTx({
+        id: uid(),
+        ...payload
+      });
+    }
     setTxForm({
       type: "gelir",
       date: todayStr(),
@@ -1864,6 +1885,7 @@ function HesaplarView({
       amount: "",
       tags: []
     });
+    setEditingTxId(null);
   };
   return /*#__PURE__*/React.createElement("div", {
     className: "fadein",
@@ -2023,7 +2045,10 @@ function HesaplarView({
     const Icon = acc.type === "banka" ? Landmark : Wallet;
     return /*#__PURE__*/React.createElement("div", {
       key: acc.id,
-      onClick: () => setActiveAcc(acc.id),
+      onClick: () => {
+        setActiveAcc(acc.id);
+        setEditingTxId(null);
+      },
       style: {
         cursor: "pointer",
         background: isActive ? C.accent : C.card,
@@ -2191,7 +2216,7 @@ function HesaplarView({
       fontWeight: 600,
       cursor: "pointer"
     }
-  }, "Ekle")), /*#__PURE__*/React.createElement(TagPicker, {
+  }, editingTxId ? "Güncelle" : "Ekle")), /*#__PURE__*/React.createElement(TagPicker, {
     tags: tags,
     selected: txForm.tags,
     onChange: ids => setTxForm({
@@ -2235,7 +2260,19 @@ function HesaplarView({
       color: t.type === "gelir" ? C.green : C.red
     }
   }, t.type === "gelir" ? "+" : "−", fmt(t.amount)), /*#__PURE__*/React.createElement("button", {
+    onClick: () => startEditTx(t),
+    title: "Düzenle",
+    style: {
+      background: "none",
+      border: "none",
+      cursor: "pointer",
+      color: C.muted
+    }
+  }, /*#__PURE__*/React.createElement(Pencil, {
+    size: 13
+  })), /*#__PURE__*/React.createElement("button", {
     onClick: () => removeTx(t.id),
+    title: "Sil",
     style: {
       background: "none",
       border: "none",
@@ -2251,11 +2288,13 @@ function HesaplarView({
 function GunlukSayim({
   counts,
   addCount,
+  editCount,
   removeCount,
   accounts,
   addTx
 }) {
   const [open, setOpen] = useState(false);
+  const [editingId, setEditingId] = useState(null);
   const defaultAcc = accounts.find(a => a.name.toLowerCase().includes("eczane"))?.id || accounts[0]?.id || "";
   const [form, setForm] = useState({
     date: todayStr(),
@@ -2266,31 +2305,56 @@ function GunlukSayim({
     note: "",
     accountId: defaultAcc
   });
+  const startEdit = c => {
+    setEditingId(c.id);
+    setForm({
+      date: c.date || todayStr(),
+      kasa: c.kasa ?? "",
+      paper: c.paper ?? "",
+      coin: c.coin ?? "",
+      pos: c.pos ?? "",
+      note: c.note || "",
+      accountId: c.accountId || defaultAcc
+    });
+    setOpen(true);
+  };
   const liveTotal = (Number(form.kasa) || 0) + (Number(form.paper) || 0) + (Number(form.coin) || 0) + (Number(form.pos) || 0);
   const submit = e => {
     e.preventDefault();
     if (!form.kasa && !form.paper && !form.coin && !form.pos) return;
-    addCount({
-      id: uid(),
-      date: form.date,
-      note: form.note,
-      accountId: form.accountId || null,
-      kasa: Number(form.kasa) || 0,
-      paper: Number(form.paper) || 0,
-      coin: Number(form.coin) || 0,
-      pos: Number(form.pos) || 0
-    });
-    if (form.accountId && Number(form.kasa) > 0) {
-      addTx({
-        id: uid(),
-        accountId: form.accountId,
-        type: "gelir",
+    if (editingId) {
+      editCount(editingId, {
         date: form.date,
-        category: "Günlük Kasa Sayımı",
-        description: form.note || "Günlük sayım",
-        amount: Number(form.kasa),
-        tags: []
+        note: form.note,
+        accountId: form.accountId || null,
+        kasa: Number(form.kasa) || 0,
+        paper: Number(form.paper) || 0,
+        coin: Number(form.coin) || 0,
+        pos: Number(form.pos) || 0
       });
+    } else {
+      addCount({
+        id: uid(),
+        date: form.date,
+        note: form.note,
+        accountId: form.accountId || null,
+        kasa: Number(form.kasa) || 0,
+        paper: Number(form.paper) || 0,
+        coin: Number(form.coin) || 0,
+        pos: Number(form.pos) || 0
+      });
+      if (form.accountId && Number(form.kasa) > 0) {
+        addTx({
+          id: uid(),
+          accountId: form.accountId,
+          type: "gelir",
+          date: form.date,
+          category: "Günlük Kasa Sayımı",
+          description: form.note || "Günlük sayım",
+          amount: Number(form.kasa),
+          tags: []
+        });
+      }
     }
     setForm({
       date: todayStr(),
@@ -2301,6 +2365,7 @@ function GunlukSayim({
       note: "",
       accountId: form.accountId
     });
+    setEditingId(null);
     setOpen(false);
   };
   const sorted = [...counts].sort((a, b) => new Date(b.date) - new Date(a.date));
@@ -2344,7 +2409,10 @@ function GunlukSayim({
       justifyContent: "flex-end"
     }
   }, /*#__PURE__*/React.createElement("button", {
-    onClick: () => setOpen(o => !o),
+    onClick: () => {
+      setEditingId(null);
+      setOpen(o => !o);
+    },
     style: {
       display: "flex",
       alignItems: "center",
@@ -2502,7 +2570,7 @@ function GunlukSayim({
       fontWeight: 600,
       cursor: "pointer"
     }
-  }, "Kaydet")), /*#__PURE__*/React.createElement("div", {
+  }, editingId ? "Güncelle" : "Kaydet")), /*#__PURE__*/React.createElement("div", {
     style: {
       background: C.card,
       borderRadius: 18,
@@ -2580,8 +2648,26 @@ function GunlukSayim({
       padding: "10px 16px",
       textAlign: "right"
     }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 8,
+      justifyContent: "flex-end"
+    }
   }, /*#__PURE__*/React.createElement("button", {
+    onClick: () => startEdit(c),
+    title: "Düzenle",
+    style: {
+      background: "none",
+      border: "none",
+      cursor: "pointer",
+      color: C.muted
+    }
+  }, /*#__PURE__*/React.createElement(Pencil, {
+    size: 14
+  })), /*#__PURE__*/React.createElement("button", {
     onClick: () => removeCount(c.id),
+    title: "Sil",
     style: {
       background: "none",
       border: "none",
@@ -2590,7 +2676,7 @@ function GunlukSayim({
     }
   }, /*#__PURE__*/React.createElement(Trash2, {
     size: 14
-  })))))))));
+  }))))))))));
 }
 function KasaBankalarView({
   accounts,
@@ -2599,11 +2685,13 @@ function KasaBankalarView({
   removeAccount,
   transactions,
   addTx,
+  editTx,
   removeTx,
   tags,
   addTag,
   counts,
   addCount,
+  editCount,
   removeCount
 }) {
   const [subTab, setSubTab] = useState("hesaplar");
@@ -2670,12 +2758,14 @@ function KasaBankalarView({
     removeAccount: removeAccount,
     transactions: transactions,
     addTx: addTx,
+    editTx: editTx,
     removeTx: removeTx,
     tags: tags,
     addTag: addTag
   }) : /*#__PURE__*/React.createElement(GunlukSayim, {
     counts: counts,
     addCount: addCount,
+    editCount: editCount,
     removeCount: removeCount,
     accounts: accounts,
     addTx: addTx
@@ -2687,12 +2777,14 @@ const GIDER_KATEGORILERI = ["Kira", "Elektrik", "Su", "Doğalgaz", "Fatura / İn
 function GenelGiderler({
   transactions,
   addTx,
+  editTx,
   removeTx,
   tags,
   addTag,
   accounts
 }) {
   const [open, setOpen] = useState(false);
+  const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState({
     date: todayStr(),
     category: GIDER_KATEGORILERI[0],
@@ -2705,6 +2797,19 @@ function GenelGiderler({
   const giderler = transactions.filter(t => t.type === "gider" && t.giderTuru !== "maas" && t.giderTuru !== "tedarikci" && t.giderTuru !== "kredikarti" && t.giderTuru !== "kesinti");
   const sorted = [...giderler].sort((a, b) => new Date(b.date) - new Date(a.date));
   const total = giderler.reduce((s, t) => s + Number(t.amount), 0);
+  const startEdit = t => {
+    setEditingId(t.id);
+    setForm({
+      date: t.date || todayStr(),
+      category: t.category || GIDER_KATEGORILERI[0],
+      description: t.description || "",
+      amount: t.amount ?? "",
+      tags: t.tags || [],
+      paymentMethod: t.paymentMethod || "hesaptan",
+      accountId: t.accountId || accounts[0]?.id || ""
+    });
+    setOpen(true);
+  };
   const submit = e => {
     e.preventDefault();
     if (!form.amount) return;
@@ -2713,15 +2818,22 @@ function GenelGiderler({
       return;
     }
     const account = form.paymentMethod === "hesaptan" ? accounts.find(a => a.id === form.accountId) : null;
-    addTx({
-      id: uid(),
+    const payload = {
       type: "gider",
       giderTuru: "genel",
       ...form,
       amount: Number(form.amount),
       accountId: form.paymentMethod === "hesaptan" ? form.accountId : null,
       accountName: account ? account.bankName || account.name : null
-    });
+    };
+    if (editingId) {
+      editTx(editingId, payload);
+    } else {
+      addTx({
+        id: uid(),
+        ...payload
+      });
+    }
     setForm({
       date: todayStr(),
       category: GIDER_KATEGORILERI[0],
@@ -2731,6 +2843,7 @@ function GenelGiderler({
       paymentMethod: form.paymentMethod,
       accountId: form.accountId
     });
+    setEditingId(null);
     setOpen(false);
   };
   return /*#__PURE__*/React.createElement("div", {
@@ -2757,7 +2870,10 @@ function GenelGiderler({
       color: C.red
     }
   }, fmt(total))), /*#__PURE__*/React.createElement("button", {
-    onClick: () => setOpen(o => !o),
+    onClick: () => {
+      setEditingId(null);
+      setOpen(o => !o);
+    },
     style: {
       display: "flex",
       alignItems: "center",
@@ -2895,7 +3011,7 @@ function GenelGiderler({
       fontWeight: 600,
       cursor: "pointer"
     }
-  }, "Kaydet")), /*#__PURE__*/React.createElement("div", {
+  }, editingId ? "Güncelle" : "Kaydet")), /*#__PURE__*/React.createElement("div", {
     style: {
       background: C.card,
       borderRadius: 18,
@@ -2971,8 +3087,26 @@ function GenelGiderler({
       padding: "10px 16px",
       textAlign: "right"
     }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 8,
+      justifyContent: "flex-end"
+    }
   }, /*#__PURE__*/React.createElement("button", {
+    onClick: () => startEdit(t),
+    title: "Düzenle",
+    style: {
+      background: "none",
+      border: "none",
+      cursor: "pointer",
+      color: C.muted
+    }
+  }, /*#__PURE__*/React.createElement(Pencil, {
+    size: 14
+  })), /*#__PURE__*/React.createElement("button", {
     onClick: () => removeTx(t.id),
+    title: "Sil",
     style: {
       background: "none",
       border: "none",
@@ -2981,7 +3115,7 @@ function GenelGiderler({
     }
   }, /*#__PURE__*/React.createElement(Trash2, {
     size: 14
-  })))))))));
+  }))))))))));
 }
 function CalisanMaaslari({
   employees,
@@ -2990,6 +3124,7 @@ function CalisanMaaslari({
   removeEmployee,
   transactions,
   addTx,
+  editTx,
   removeTx,
   tags,
   addTag,
@@ -3013,6 +3148,7 @@ function CalisanMaaslari({
     setOpenEmp(true);
   };
   const [activeEmp, setActiveEmp] = useState(null);
+  const [editingPayId, setEditingPayId] = useState(null);
   const [payForm, setPayForm] = useState({
     date: todayStr(),
     month: todayStr().slice(0, 7),
@@ -3022,6 +3158,19 @@ function CalisanMaaslari({
     paymentMethod: "hesaptan",
     accountId: accounts[0]?.id || ""
   });
+  const startEditPay = p => {
+    setEditingPayId(p.id);
+    setActiveEmp(p.employeeId);
+    setPayForm({
+      date: p.date || todayStr(),
+      month: p.month || todayStr().slice(0, 7),
+      amount: p.amount ?? "",
+      note: p.note || "",
+      tags: p.tags || [],
+      paymentMethod: p.paymentMethod || "hesaptan",
+      accountId: p.accountId || accounts[0]?.id || ""
+    });
+  };
   const payments = transactions.filter(t => t.type === "gider" && t.giderTuru === "maas");
   const paidThisMonthIds = new Set(payments.filter(p => p.month === todayStr().slice(0, 7)).map(p => p.employeeId));
   const totalPayroll = employees.reduce((s, e) => s + Number(e.salary || 0), 0);
@@ -3054,8 +3203,7 @@ function CalisanMaaslari({
     }
     const emp = employees.find(x => x.id === activeEmp);
     const account = payForm.paymentMethod === "hesaptan" ? accounts.find(a => a.id === payForm.accountId) : null;
-    addTx({
-      id: uid(),
+    const payload = {
       type: "gider",
       giderTuru: "maas",
       employeeId: activeEmp,
@@ -3069,7 +3217,15 @@ function CalisanMaaslari({
       accountId: payForm.paymentMethod === "hesaptan" ? payForm.accountId : null,
       accountName: account ? account.bankName || account.name : null,
       note: payForm.note
-    });
+    };
+    if (editingPayId) {
+      editTx(editingPayId, payload);
+    } else {
+      addTx({
+        id: uid(),
+        ...payload
+      });
+    }
     setPayForm({
       date: todayStr(),
       month: todayStr().slice(0, 7),
@@ -3079,6 +3235,7 @@ function CalisanMaaslari({
       paymentMethod: payForm.paymentMethod,
       accountId: payForm.accountId
     });
+    setEditingPayId(null);
   };
   return /*#__PURE__*/React.createElement("div", {
     className: "fadein",
@@ -3221,6 +3378,7 @@ function CalisanMaaslari({
       key: emp.id,
       onClick: () => {
         setActiveEmp(emp.id);
+        setEditingPayId(null);
         setPayForm(f => ({
           ...f,
           amount: emp.salary
@@ -3374,7 +3532,7 @@ function CalisanMaaslari({
       fontWeight: 600,
       cursor: "pointer"
     }
-  }, "Öde")), /*#__PURE__*/React.createElement("div", {
+  }, editingPayId ? "Güncelle" : "Öde")), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "grid",
       gridTemplateColumns: payForm.paymentMethod === "hesaptan" ? "160px 1fr" : "160px",
@@ -3476,7 +3634,19 @@ function CalisanMaaslari({
       color: C.red
     }
   }, "−", fmt(p.amount)), /*#__PURE__*/React.createElement("button", {
+    onClick: () => startEditPay(p),
+    title: "Düzenle",
+    style: {
+      background: "none",
+      border: "none",
+      cursor: "pointer",
+      color: C.muted
+    }
+  }, /*#__PURE__*/React.createElement(Pencil, {
+    size: 13
+  })), /*#__PURE__*/React.createElement("button", {
     onClick: () => removeTx(p.id),
+    title: "Sil",
     style: {
       background: "none",
       border: "none",
@@ -3490,6 +3660,7 @@ function CalisanMaaslari({
 function GiderlerView({
   transactions,
   addTx,
+  editTx,
   removeTx,
   employees,
   addEmployee,
@@ -3565,6 +3736,7 @@ function GiderlerView({
   }), " ", label))), subTab === "genel" ? /*#__PURE__*/React.createElement(GenelGiderler, {
     transactions: transactions,
     addTx: addTx,
+    editTx: editTx,
     removeTx: removeTx,
     tags: tags,
     addTag: addTag,
@@ -3576,6 +3748,7 @@ function GiderlerView({
     editEmployee: editEmployee,
     transactions: transactions,
     addTx: addTx,
+    editTx: editTx,
     removeTx: removeTx,
     tags: tags,
     addTag: addTag,
@@ -3591,6 +3764,8 @@ function SuppliersView({
   editSupplier,
   removeSupplier,
   addSupplierTx,
+  editSupplierTx,
+  removeSupplierTx,
   tags,
   addTag
 }) {
@@ -3612,6 +3787,7 @@ function SuppliersView({
     setOpenSupplier(true);
   };
   const [activeSupplier, setActiveSupplier] = useState(null);
+  const [editingTxId, setEditingTxId] = useState(null);
   const [txForm, setTxForm] = useState({
     type: "borç",
     date: todayStr(),
@@ -3619,6 +3795,17 @@ function SuppliersView({
     amount: "",
     tags: []
   });
+  const startEditTx = t => {
+    setEditingTxId(t.id);
+    setActiveSupplier(t.supplierId);
+    setTxForm({
+      type: t.type || "borç",
+      date: t.date || todayStr(),
+      description: t.description || "",
+      amount: t.amount ?? "",
+      tags: t.tags || []
+    });
+  };
   const balanceOf = id => supplierTx.filter(t => t.supplierId === id).reduce((s, t) => s + (t.type === "borç" ? Number(t.amount) : -Number(t.amount)), 0);
   const submitSupplier = e => {
     e.preventDefault();
@@ -3638,12 +3825,20 @@ function SuppliersView({
   const submitTx = e => {
     e.preventDefault();
     if (!txForm.amount || !activeSupplier) return;
-    addSupplierTx({
-      id: uid(),
-      supplierId: activeSupplier,
-      ...txForm,
-      amount: Number(txForm.amount)
-    });
+    if (editingTxId) {
+      editSupplierTx(editingTxId, {
+        supplierId: activeSupplier,
+        ...txForm,
+        amount: Number(txForm.amount)
+      });
+    } else {
+      addSupplierTx({
+        id: uid(),
+        supplierId: activeSupplier,
+        ...txForm,
+        amount: Number(txForm.amount)
+      });
+    }
     setTxForm({
       type: "borç",
       date: todayStr(),
@@ -3651,6 +3846,7 @@ function SuppliersView({
       amount: "",
       tags: []
     });
+    setEditingTxId(null);
   };
   return /*#__PURE__*/React.createElement("div", {
     className: "fadein",
@@ -3786,7 +3982,10 @@ function SuppliersView({
     const isActive = activeSupplier === s.id;
     return /*#__PURE__*/React.createElement("div", {
       key: s.id,
-      onClick: () => setActiveSupplier(s.id),
+      onClick: () => {
+        setActiveSupplier(s.id);
+        setEditingTxId(null);
+      },
       style: {
         cursor: "pointer",
         background: isActive ? C.accent : C.card,
@@ -3936,7 +4135,7 @@ function SuppliersView({
       fontWeight: 600,
       cursor: "pointer"
     }
-  }, "Ekle")), /*#__PURE__*/React.createElement(TagPicker, {
+  }, editingTxId ? "Güncelle" : "Ekle")), /*#__PURE__*/React.createElement(TagPicker, {
     tags: tags,
     selected: txForm.tags,
     onChange: ids => setTxForm({
@@ -3967,13 +4166,41 @@ function SuppliersView({
     ids: t.tags,
     tags: tags
   })), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 10
+    }
+  }, /*#__PURE__*/React.createElement("span", {
     className: "ecz-mono",
     style: {
       fontWeight: 600,
       fontSize: 13.5,
       color: t.type === "borç" ? C.red : C.green
     }
-  }, t.type === "borç" ? "+" : "−", fmt(t.amount)))))))));
+  }, t.type === "borç" ? "+" : "−", fmt(t.amount)), /*#__PURE__*/React.createElement("button", {
+    onClick: () => startEditTx(t),
+    title: "Düzenle",
+    style: {
+      background: "none",
+      border: "none",
+      cursor: "pointer",
+      color: C.muted
+    }
+  }, /*#__PURE__*/React.createElement(Pencil, {
+    size: 13
+  })), /*#__PURE__*/React.createElement("button", {
+    onClick: () => removeSupplierTx(t.id),
+    title: "Sil",
+    style: {
+      background: "none",
+      border: "none",
+      cursor: "pointer",
+      color: C.muted
+    }
+  }, /*#__PURE__*/React.createElement(Trash2, {
+    size: 13
+  }))))))))));
 }
 
 /* ---------------- SGK / REÇETE ---------------- */
@@ -3987,12 +4214,14 @@ const INSTITUTIONS = [{
 function PrescriptionsView({
   prescriptions,
   addPrescription,
+  editPrescription,
   removePrescription,
   togglePaid,
   tags,
   addTag
 }) {
   const [open, setOpen] = useState(false);
+  const [editingId, setEditingId] = useState(null);
   const [filterInst, setFilterInst] = useState("Tümü");
   const [form, setForm] = useState({
     date: todayStr(),
@@ -4002,15 +4231,34 @@ function PrescriptionsView({
     amount: "",
     tags: []
   });
+  const startEdit = p => {
+    setEditingId(p.id);
+    setForm({
+      date: p.date || todayStr(),
+      institution: p.institution || "SGK",
+      invoiceNo: p.invoiceNo || "",
+      description: p.description || "",
+      amount: p.amount ?? "",
+      tags: p.tags || []
+    });
+    setOpen(true);
+  };
   const submit = e => {
     e.preventDefault();
     if (!form.amount) return;
-    addPrescription({
-      id: uid(),
-      ...form,
-      amount: Number(form.amount),
-      status: "bekliyor"
-    });
+    if (editingId) {
+      editPrescription(editingId, {
+        ...form,
+        amount: Number(form.amount)
+      });
+    } else {
+      addPrescription({
+        id: uid(),
+        ...form,
+        amount: Number(form.amount),
+        status: "bekliyor"
+      });
+    }
     setForm({
       date: todayStr(),
       institution: "SGK",
@@ -4019,6 +4267,7 @@ function PrescriptionsView({
       amount: "",
       tags: []
     });
+    setEditingId(null);
     setOpen(false);
   };
   const filtered = filterInst === "Tümü" ? prescriptions : prescriptions.filter(p => (p.institution || "SGK") === filterInst);
@@ -4058,7 +4307,10 @@ function PrescriptionsView({
       marginTop: 4
     }
   }, "SGK ve AHSB'ye kesilen faturaları ve ödeme durumlarını yönet.")), /*#__PURE__*/React.createElement("button", {
-    onClick: () => setOpen(o => !o),
+    onClick: () => {
+      setEditingId(null);
+      setOpen(o => !o);
+    },
     style: {
       display: "flex",
       alignItems: "center",
@@ -4219,7 +4471,7 @@ function PrescriptionsView({
       cursor: "pointer",
       width: "100%"
     }
-  }, "Kaydet"))), /*#__PURE__*/React.createElement("div", {
+  }, editingId ? "Güncelle" : "Kaydet"))), /*#__PURE__*/React.createElement("div", {
     style: {
       background: C.card,
       borderRadius: 18,
@@ -4312,8 +4564,26 @@ function PrescriptionsView({
       padding: "10px 16px",
       textAlign: "right"
     }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 8,
+      justifyContent: "flex-end"
+    }
   }, /*#__PURE__*/React.createElement("button", {
+    onClick: () => startEdit(p),
+    title: "Düzenle",
+    style: {
+      background: "none",
+      border: "none",
+      cursor: "pointer",
+      color: C.muted
+    }
+  }, /*#__PURE__*/React.createElement(Pencil, {
+    size: 14
+  })), /*#__PURE__*/React.createElement("button", {
     onClick: () => removePrescription(p.id),
+    title: "Sil",
     style: {
       background: "none",
       border: "none",
@@ -4322,7 +4592,7 @@ function PrescriptionsView({
     }
   }, /*#__PURE__*/React.createElement(Trash2, {
     size: 14
-  })))))))));
+  }))))))))));
 }
 
 /* ---------------- ETİKETLER (yönetim ekranı) ---------------- */
@@ -4556,9 +4826,19 @@ function installmentsFor(charge) {
 function CardChargeForm({
   cards,
   suppliers,
-  onSubmit
+  onSubmit,
+  initial,
+  editing
 }) {
-  const [form, setForm] = useState({
+  const [form, setForm] = useState(initial ? {
+    cardId: initial.cardId || "",
+    supplierName: initial.supplierName || "",
+    date: initial.date || todayStr(),
+    amount: initial.amount ?? "",
+    type: initial.type || "tek",
+    installments: initial.installments || 3,
+    firstPaymentDate: initial.firstPaymentDate || todayStr()
+  } : {
     cardId: "",
     supplierName: "",
     date: todayStr(),
@@ -4575,15 +4855,17 @@ function CardChargeForm({
       amount: Number(form.amount),
       installments: Number(form.installments) || 1
     });
-    setForm({
-      cardId: form.cardId,
-      supplierName: "",
-      date: todayStr(),
-      amount: "",
-      type: "tek",
-      installments: 3,
-      firstPaymentDate: todayStr()
-    });
+    if (!editing) {
+      setForm({
+        cardId: form.cardId,
+        supplierName: "",
+        date: todayStr(),
+        amount: "",
+        type: "tek",
+        installments: 3,
+        firstPaymentDate: todayStr()
+      });
+    }
   };
   return /*#__PURE__*/React.createElement("form", {
     onSubmit: submit,
@@ -4701,7 +4983,7 @@ function CardChargeForm({
       fontWeight: 600,
       cursor: "pointer"
     }
-  }, "Çekimi Kaydet"));
+  }, editing ? "Çekimi Güncelle" : "Çekimi Kaydet"));
 }
 function KrediKartlariView({
   cards,
@@ -4710,6 +4992,7 @@ function KrediKartlariView({
   removeCard,
   charges,
   addCharge,
+  editCharge,
   removeCharge,
   togglePaidInstallment,
   suppliers
@@ -4730,6 +5013,11 @@ function KrediKartlariView({
     setOpenCard(true);
   };
   const [openCharge, setOpenCharge] = useState(false);
+  const [editingChargeId, setEditingChargeId] = useState(null);
+  const startEditCharge = charge => {
+    setEditingChargeId(charge.id);
+    setOpenCharge(true);
+  };
   const submitCard = e => {
     e.preventDefault();
     if (!cardForm.name) return;
@@ -4917,7 +5205,10 @@ function KrediKartlariView({
       flexWrap: "wrap"
     }
   }, /*#__PURE__*/React.createElement("button", {
-    onClick: () => setOpenCharge(o => !o),
+    onClick: () => {
+      setEditingChargeId(null);
+      setOpenCharge(o => !o);
+    },
     style: {
       display: "flex",
       alignItems: "center",
@@ -5019,13 +5310,24 @@ function KrediKartlariView({
   }, /*#__PURE__*/React.createElement(EmptyState, {
     text: "Çekim ekleyebilmek için önce bir kart eklemelisin."
   })) : /*#__PURE__*/React.createElement(CardChargeForm, {
+    key: editingChargeId || "new",
     cards: cards,
     suppliers: suppliers,
-    onSubmit: c => addCharge({
-      id: uid(),
-      ...c,
-      paidInstallments: []
-    })
+    editing: !!editingChargeId,
+    initial: editingChargeId ? charges.find(c => c.id === editingChargeId) : null,
+    onSubmit: c => {
+      if (editingChargeId) {
+        editCharge(editingChargeId, c);
+        setEditingChargeId(null);
+        setOpenCharge(false);
+      } else {
+        addCharge({
+          id: uid(),
+          ...c,
+          paidInstallments: []
+        });
+      }
+    }
   })), cards.length > 0 && /*#__PURE__*/React.createElement("div", {
     style: {
       background: C.card,
@@ -5141,7 +5443,19 @@ function KrediKartlariView({
         fontSize: 13.5
       }
     }, fmt(c.amount)), /*#__PURE__*/React.createElement("button", {
+      onClick: () => startEditCharge(c),
+      title: "Düzenle",
+      style: {
+        background: "none",
+        border: "none",
+        cursor: "pointer",
+        color: C.muted
+      }
+    }, /*#__PURE__*/React.createElement(Pencil, {
+      size: 13
+    })), /*#__PURE__*/React.createElement("button", {
       onClick: () => removeCharge(c.id),
+      title: "Sil",
       style: {
         background: "none",
         border: "none",
@@ -5159,11 +5473,13 @@ function KesintilerView({
   prescriptions,
   deductions,
   addDeduction,
+  editDeduction,
   removeDeduction,
   tags,
   addTag
 }) {
   const [open, setOpen] = useState(false);
+  const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState({
     date: todayStr(),
     reason: "",
@@ -5171,14 +5487,33 @@ function KesintilerView({
     username: "",
     tags: []
   });
+  const startEdit = d => {
+    setEditingId(d.id);
+    setForm({
+      date: d.date || todayStr(),
+      reason: d.reason || "",
+      amount: d.amount ?? "",
+      username: d.username || "",
+      prescriptionId: d.prescriptionId || null,
+      tags: d.tags || []
+    });
+    setOpen(true);
+  };
   const submit = e => {
     e.preventDefault();
     if (!form.amount) return;
-    addDeduction({
-      id: uid(),
-      ...form,
-      amount: Number(form.amount)
-    });
+    if (editingId) {
+      editDeduction(editingId, {
+        ...form,
+        amount: Number(form.amount)
+      });
+    } else {
+      addDeduction({
+        id: uid(),
+        ...form,
+        amount: Number(form.amount)
+      });
+    }
     setForm({
       date: todayStr(),
       reason: "",
@@ -5186,6 +5521,7 @@ function KesintilerView({
       username: "",
       tags: []
     });
+    setEditingId(null);
     setOpen(false);
   };
   const sorted = [...deductions].sort((a, b) => new Date(b.date) - new Date(a.date));
@@ -5233,7 +5569,10 @@ function KesintilerView({
       marginTop: 4
     }
   }, "SGK/fatura kaynaklı kesintileri ve nedenlerini takip et.")), /*#__PURE__*/React.createElement("button", {
-    onClick: () => setOpen(o => !o),
+    onClick: () => {
+      setEditingId(null);
+      setOpen(o => !o);
+    },
     style: {
       display: "flex",
       alignItems: "center",
@@ -5370,7 +5709,7 @@ function KesintilerView({
       fontWeight: 600,
       cursor: "pointer"
     }
-  }, "Kaydet")), byUser.length > 0 && /*#__PURE__*/React.createElement("div", {
+  }, editingId ? "Güncelle" : "Kaydet")), byUser.length > 0 && /*#__PURE__*/React.createElement("div", {
     style: {
       background: C.card,
       borderRadius: 18,
@@ -5482,8 +5821,26 @@ function KesintilerView({
       padding: "10px 16px",
       textAlign: "right"
     }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 8,
+      justifyContent: "flex-end"
+    }
   }, /*#__PURE__*/React.createElement("button", {
+    onClick: () => startEdit(d),
+    title: "Düzenle",
+    style: {
+      background: "none",
+      border: "none",
+      cursor: "pointer",
+      color: C.muted
+    }
+  }, /*#__PURE__*/React.createElement(Pencil, {
+    size: 14
+  })), /*#__PURE__*/React.createElement("button", {
     onClick: () => removeDeduction(d.id),
+    title: "Sil",
     style: {
       background: "none",
       border: "none",
@@ -5492,13 +5849,14 @@ function KesintilerView({
     }
   }, /*#__PURE__*/React.createElement(Trash2, {
     size: 14
-  })))))))));
+  }))))))))));
 }
 
 /* ---------------- İADELER ---------------- */
 function IadelerView({
   returns,
   addReturn,
+  editReturn,
   removeReturn,
   toggleReturnStatus,
   suppliers,
@@ -5506,6 +5864,7 @@ function IadelerView({
   addTag
 }) {
   const [open, setOpen] = useState(false);
+  const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState({
     date: todayStr(),
     invoiceNo: "",
@@ -5514,17 +5873,37 @@ function IadelerView({
     amount: "",
     tags: []
   });
+  const startEdit = r => {
+    setEditingId(r.id);
+    setForm({
+      date: r.date || todayStr(),
+      invoiceNo: r.invoiceNo || "",
+      supplierName: r.supplierName || "",
+      content: r.content || "",
+      amount: r.amount ?? "",
+      tags: r.tags || []
+    });
+    setOpen(true);
+  };
   const submit = e => {
     const matchedSupplier = suppliers.find(sp => sp.name === form.supplierName);
     e.preventDefault();
     if (!form.supplierName || !form.content) return;
-    addReturn({
-      id: uid(),
-      supplierId: matchedSupplier ? matchedSupplier.id : null,
-      ...form,
-      amount: Number(form.amount) || 0,
-      status: "bekliyor"
-    });
+    if (editingId) {
+      editReturn(editingId, {
+        supplierId: matchedSupplier ? matchedSupplier.id : null,
+        ...form,
+        amount: Number(form.amount) || 0
+      });
+    } else {
+      addReturn({
+        id: uid(),
+        supplierId: matchedSupplier ? matchedSupplier.id : null,
+        ...form,
+        amount: Number(form.amount) || 0,
+        status: "bekliyor"
+      });
+    }
     setForm({
       date: todayStr(),
       invoiceNo: "",
@@ -5533,6 +5912,7 @@ function IadelerView({
       amount: "",
       tags: []
     });
+    setEditingId(null);
     setOpen(false);
   };
   const sorted = [...returns].sort((a, b) => new Date(b.date) - new Date(a.date));
@@ -5581,7 +5961,10 @@ function IadelerView({
       marginTop: 4
     }
   }, "Tedarikçilere yapılan ürün iadelerini takip et.")), /*#__PURE__*/React.createElement("button", {
-    onClick: () => setOpen(o => !o),
+    onClick: () => {
+      setEditingId(null);
+      setOpen(o => !o);
+    },
     style: {
       display: "flex",
       alignItems: "center",
@@ -5728,7 +6111,7 @@ function IadelerView({
       fontWeight: 600,
       cursor: "pointer"
     }
-  }, "Kaydet")), /*#__PURE__*/React.createElement("div", {
+  }, editingId ? "Güncelle" : "Kaydet")), /*#__PURE__*/React.createElement("div", {
     style: {
       background: C.card,
       borderRadius: 18,
@@ -5813,8 +6196,26 @@ function IadelerView({
       padding: "10px 16px",
       textAlign: "right"
     }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 8,
+      justifyContent: "flex-end"
+    }
   }, /*#__PURE__*/React.createElement("button", {
+    onClick: () => startEdit(r),
+    title: "Düzenle",
+    style: {
+      background: "none",
+      border: "none",
+      cursor: "pointer",
+      color: C.muted
+    }
+  }, /*#__PURE__*/React.createElement(Pencil, {
+    size: 14
+  })), /*#__PURE__*/React.createElement("button", {
     onClick: () => removeReturn(r.id),
+    title: "Sil",
     style: {
       background: "none",
       border: "none",
@@ -5823,7 +6224,7 @@ function IadelerView({
     }
   }, /*#__PURE__*/React.createElement(Trash2, {
     size: 14
-  })))))))));
+  }))))))))));
 }
 
 /* ---------------- İZİNLER ---------------- */
@@ -5845,12 +6246,14 @@ function dayCount(start, end) {
 function IzinlerView({
   leaves,
   addLeave,
+  editLeave,
   removeLeave,
   employees,
   tags,
   addTag
 }) {
   const [open, setOpen] = useState(false);
+  const [editingId, setEditingId] = useState(null);
   const todayD = todayStr();
   const [form, setForm] = useState({
     employeeId: employees[0]?.id || "",
@@ -5860,13 +6263,29 @@ function IzinlerView({
     note: "",
     tags: []
   });
+  const startEdit = l => {
+    setEditingId(l.id);
+    setForm({
+      employeeId: l.employeeId || employees[0]?.id || "",
+      startDate: l.startDate || todayD,
+      endDate: l.endDate || todayD,
+      type: l.type || "yillik",
+      note: l.note || "",
+      tags: l.tags || []
+    });
+    setOpen(true);
+  };
   const submit = e => {
     e.preventDefault();
     if (!form.employeeId || !form.startDate || !form.endDate) return;
-    addLeave({
-      id: uid(),
-      ...form
-    });
+    if (editingId) {
+      editLeave(editingId, form);
+    } else {
+      addLeave({
+        id: uid(),
+        ...form
+      });
+    }
     setForm({
       employeeId: form.employeeId,
       startDate: todayD,
@@ -5875,6 +6294,7 @@ function IzinlerView({
       note: "",
       tags: []
     });
+    setEditingId(null);
     setOpen(false);
   };
   const empName = id => employees.find(e => e.id === id)?.name || "—";
@@ -5923,7 +6343,10 @@ function IzinlerView({
       marginTop: 4
     }
   }, "Personel izin tarihlerini ve türlerini takip et.")), /*#__PURE__*/React.createElement("button", {
-    onClick: () => setOpen(o => !o),
+    onClick: () => {
+      setEditingId(null);
+      setOpen(o => !o);
+    },
     disabled: employees.length === 0,
     style: {
       display: "flex",
@@ -6078,7 +6501,7 @@ function IzinlerView({
       fontWeight: 600,
       cursor: "pointer"
     }
-  }, "Kaydet")), byEmployee.length > 0 && /*#__PURE__*/React.createElement("div", {
+  }, editingId ? "Güncelle" : "Kaydet")), byEmployee.length > 0 && /*#__PURE__*/React.createElement("div", {
     style: {
       background: C.card,
       borderRadius: 18,
@@ -6213,8 +6636,26 @@ function IzinlerView({
         padding: "10px 16px",
         textAlign: "right"
       }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: "flex",
+        gap: 8,
+        justifyContent: "flex-end"
+      }
     }, /*#__PURE__*/React.createElement("button", {
+      onClick: () => startEdit(l),
+      title: "Düzenle",
+      style: {
+        background: "none",
+        border: "none",
+        cursor: "pointer",
+        color: C.muted
+      }
+    }, /*#__PURE__*/React.createElement(Pencil, {
+      size: 14
+    })), /*#__PURE__*/React.createElement("button", {
       onClick: () => removeLeave(l.id),
+      title: "Sil",
       style: {
         background: "none",
         border: "none",
@@ -6223,7 +6664,7 @@ function IzinlerView({
       }
     }, /*#__PURE__*/React.createElement(Trash2, {
       size: 14
-    }))));
+    })))));
   })))));
 }
 
@@ -6274,6 +6715,16 @@ function App() {
     saveKey("ecz-transactions", next);
     return next;
   }), []);
+  const editTx = useCallback((id, patch) => {
+    setTransactions(prev => {
+      const next = prev.map(t => t.id === id ? {
+        ...t,
+        ...patch
+      } : t);
+      saveKey("ecz-transactions", next);
+      return next;
+    });
+  }, []);
   const addSupplier = useCallback(s => setSuppliers(prev => {
     const next = [...prev, s];
     saveKey("ecz-suppliers", next);
@@ -6327,6 +6778,23 @@ function App() {
       });
     }
   }, [suppliers, addTx]);
+  const editSupplierTx = useCallback((id, patch) => {
+    setSupplierTx(prev => {
+      const next = prev.map(t => t.id === id ? {
+        ...t,
+        ...patch
+      } : t);
+      saveKey("ecz-supplier-tx", next);
+      return next;
+    });
+  }, []);
+  const removeSupplierTx = useCallback(id => {
+    setSupplierTx(prev => {
+      const next = prev.filter(t => t.id !== id);
+      saveKey("ecz-supplier-tx", next);
+      return next;
+    });
+  }, []);
   const addPrescription = useCallback(p => setPrescriptions(prev => {
     const next = [...prev, p];
     saveKey("ecz-prescriptions", next);
@@ -6341,6 +6809,29 @@ function App() {
     setTransactions(prev => {
       const next = prev.filter(t => t.prescriptionId !== id);
       saveKey("ecz-transactions", next);
+      return next;
+    });
+  }, []);
+  const editPrescription = useCallback((id, patch) => {
+    setPrescriptions(prev => {
+      const next = prev.map(p => p.id === id ? {
+        ...p,
+        ...patch
+      } : p);
+      saveKey("ecz-prescriptions", next);
+      const updated = next.find(p => p.id === id);
+      if (updated) {
+        setTransactions(prevTx => {
+          const nextTx = prevTx.map(t => t.prescriptionId === id ? {
+            ...t,
+            amount: Number(updated.amount),
+            category: updated.institution === "SGK" ? "SGK Tahsilatı" : "AHSB Tahsilatı",
+            description: `${updated.institution}${updated.invoiceNo ? " — " + updated.invoiceNo : ""}${updated.description ? " (" + updated.description + ")" : ""}`
+          } : t);
+          saveKey("ecz-transactions", nextTx);
+          return nextTx;
+        });
+      }
       return next;
     });
   }, []);
@@ -6443,6 +6934,16 @@ function App() {
     saveKey("ecz-daily-counts", next);
     return next;
   }), []);
+  const editCount = useCallback((id, patch) => {
+    setCounts(prev => {
+      const next = prev.map(c => c.id === id ? {
+        ...c,
+        ...patch
+      } : c);
+      saveKey("ecz-daily-counts", next);
+      return next;
+    });
+  }, []);
   const addCard = useCallback(c => setCards(prev => {
     const next = [...prev, c];
     saveKey("ecz-cards", next);
@@ -6480,6 +6981,16 @@ function App() {
     saveKey("ecz-card-charges", next);
     return next;
   }), []);
+  const editCharge = useCallback((id, patch) => {
+    setCharges(prev => {
+      const next = prev.map(c => c.id === id ? {
+        ...c,
+        ...patch
+      } : c);
+      saveKey("ecz-card-charges", next);
+      return next;
+    });
+  }, []);
   const removeCharge = useCallback(id => {
     setCharges(prev => {
       const next = prev.filter(c => c.id !== id);
@@ -6553,6 +7064,31 @@ function App() {
       });
     }
   }, [addTx]);
+  const editDeduction = useCallback((id, patch) => {
+    setDeductions(prev => {
+      const next = prev.map(d => d.id === id ? {
+        ...d,
+        ...patch
+      } : d);
+      saveKey("ecz-deductions", next);
+      const updated = next.find(d => d.id === id);
+      if (updated) {
+        setTransactions(prevTx => {
+          const nextTx = prevTx.map(t => t.deductionId === id ? {
+            ...t,
+            prescriptionId: updated.prescriptionId,
+            date: updated.date,
+            amount: Number(updated.amount),
+            description: `Kesinti${updated.reason ? " - " + updated.reason : ""}`,
+            tags: updated.tags || []
+          } : t);
+          saveKey("ecz-transactions", nextTx);
+          return nextTx;
+        });
+      }
+      return next;
+    });
+  }, []);
   const removeDeduction = useCallback(id => {
     setDeductions(prev => {
       const next = prev.filter(d => d.id !== id);
@@ -6570,6 +7106,16 @@ function App() {
     saveKey("ecz-returns", next);
     return next;
   }), []);
+  const editReturn = useCallback((id, patch) => {
+    setReturnsList(prev => {
+      const next = prev.map(r => r.id === id ? {
+        ...r,
+        ...patch
+      } : r);
+      saveKey("ecz-returns", next);
+      return next;
+    });
+  }, []);
   const removeReturn = useCallback(id => setReturnsList(prev => {
     const next = prev.filter(r => r.id !== id);
     saveKey("ecz-returns", next);
@@ -6580,6 +7126,16 @@ function App() {
     saveKey("ecz-leaves", next);
     return next;
   }), []);
+  const editLeave = useCallback((id, patch) => {
+    setLeaves(prev => {
+      const next = prev.map(l => l.id === id ? {
+        ...l,
+        ...patch
+      } : l);
+      saveKey("ecz-leaves", next);
+      return next;
+    });
+  }, []);
   const removeLeave = useCallback(id => setLeaves(prev => {
     const next = prev.filter(l => l.id !== id);
     saveKey("ecz-leaves", next);
@@ -7463,15 +8019,18 @@ function App() {
     removeAccount: removeAccount,
     transactions: transactions,
     addTx: addTx,
+    editTx: editTx,
     removeTx: removeTx,
     tags: tags,
     addTag: addTag,
     counts: counts,
     addCount: addCount,
+    editCount: editCount,
     removeCount: removeCount
   }), tab === "giderler" && /*#__PURE__*/React.createElement(GiderlerView, {
     transactions: transactions,
     addTx: addTx,
+    editTx: editTx,
     removeTx: removeTx,
     employees: employees,
     addEmployee: addEmployee,
@@ -7487,11 +8046,14 @@ function App() {
     editSupplier: editSupplier,
     removeSupplier: removeSupplier,
     addSupplierTx: addSupplierTx,
+    editSupplierTx: editSupplierTx,
+    removeSupplierTx: removeSupplierTx,
     tags: tags,
     addTag: addTag
   }), tab === "sgk" && /*#__PURE__*/React.createElement(PrescriptionsView, {
     prescriptions: prescriptions,
     addPrescription: addPrescription,
+    editPrescription: editPrescription,
     removePrescription: removePrescription,
     togglePaid: togglePaid,
     tags: tags,
@@ -7503,6 +8065,7 @@ function App() {
     removeCard: removeCard,
     charges: charges,
     addCharge: addCharge,
+    editCharge: editCharge,
     removeCharge: removeCharge,
     togglePaidInstallment: togglePaidInstallment,
     suppliers: suppliers
@@ -7510,12 +8073,14 @@ function App() {
     prescriptions: prescriptions,
     deductions: deductions,
     addDeduction: addDeduction,
+    editDeduction: editDeduction,
     removeDeduction: removeDeduction,
     tags: tags,
     addTag: addTag
   }), tab === "iadeler" && /*#__PURE__*/React.createElement(IadelerView, {
     returns: returnsList,
     addReturn: addReturn,
+    editReturn: editReturn,
     removeReturn: removeReturn,
     toggleReturnStatus: toggleReturnStatus,
     suppliers: suppliers,
@@ -7524,6 +8089,7 @@ function App() {
   }), tab === "izinler" && /*#__PURE__*/React.createElement(IzinlerView, {
     leaves: leaves,
     addLeave: addLeave,
+    editLeave: editLeave,
     removeLeave: removeLeave,
     employees: employees,
     tags: tags,

@@ -634,13 +634,20 @@ function MiniBarChart({
   data
 }) {
   const max = Math.max(1, ...data.map(d => Math.max(d.gelir, d.gider)));
-  const W = 640,
+  const W = 680,
     H = 200,
+    padL = 46,
+    padR = 8,
     padB = 22,
     padT = 8;
+  const chartW = W - padL - padR;
   const chartH = H - padB - padT;
-  const groupW = W / Math.max(1, data.length);
-  const barW = Math.min(20, groupW / 3.4);
+  const n = data.length;
+  const xFor = i => n <= 1 ? padL + chartW / 2 : padL + chartW * (i / (n - 1));
+  const yFor = v => padT + chartH - v / max * chartH;
+  const fmtAxis = v => "₺" + Math.round(v).toLocaleString("tr-TR");
+  const gelirPoints = data.map((d, i) => `${xFor(i)},${yFor(d.gelir)}`).join(" ");
+  const giderPoints = data.map((d, i) => `${xFor(i)},${yFor(d.gider)}`).join(" ");
   return /*#__PURE__*/React.createElement("svg", {
     viewBox: `0 0 ${W} ${H}`,
     style: {
@@ -649,42 +656,67 @@ function MiniBarChart({
       display: "block"
     },
     preserveAspectRatio: "none"
-  }, [0, 0.25, 0.5, 0.75, 1].map(f => /*#__PURE__*/React.createElement("line", {
-    key: f,
-    x1: 0,
-    x2: W,
+  }, [0, 0.25, 0.5, 0.75, 1].map(f => /*#__PURE__*/React.createElement("g", {
+    key: f
+  }, /*#__PURE__*/React.createElement("line", {
+    x1: padL,
+    x2: W - padR,
     y1: padT + chartH * (1 - f),
     y2: padT + chartH * (1 - f),
     stroke: "#E5E5EA",
     strokeWidth: 1
-  })), data.map((d, i) => {
-    const cx = groupW * i + groupW / 2;
-    const gH = d.gelir / max * chartH;
-    const eH = d.gider / max * chartH;
-    return /*#__PURE__*/React.createElement("g", {
-      key: i
-    }, /*#__PURE__*/React.createElement("rect", {
-      x: cx - barW - 2,
-      y: padT + chartH - gH,
-      width: barW,
-      height: Math.max(gH, 1),
-      rx: 3,
-      fill: "#30A46C"
-    }), /*#__PURE__*/React.createElement("rect", {
-      x: cx + 2,
-      y: padT + chartH - eH,
-      width: barW,
-      height: Math.max(eH, 1),
-      rx: 3,
-      fill: "#FF3B30"
-    }), /*#__PURE__*/React.createElement("text", {
-      x: cx,
-      y: H - 5,
-      textAnchor: "middle",
-      fontSize: "11",
-      fill: "#6E6E73"
-    }, d.label));
-  }));
+  }), /*#__PURE__*/React.createElement("text", {
+    x: padL - 8,
+    y: padT + chartH * (1 - f) + 3,
+    textAnchor: "end",
+    fontSize: "10",
+    fill: "#6E6E73"
+  }, fmtAxis(max * f)))), /*#__PURE__*/React.createElement("polyline", {
+    points: giderPoints,
+    fill: "none",
+    stroke: "#FF3B30",
+    strokeWidth: 2,
+    strokeLinecap: "round",
+    strokeLinejoin: "round"
+  }), /*#__PURE__*/React.createElement("polyline", {
+    points: gelirPoints,
+    fill: "none",
+    stroke: "#30A46C",
+    strokeWidth: 2,
+    strokeLinecap: "round",
+    strokeLinejoin: "round"
+  }), data.map((d, i) => /*#__PURE__*/React.createElement("g", {
+    key: i
+  }, /*#__PURE__*/React.createElement("circle", {
+    cx: xFor(i),
+    cy: yFor(d.gider),
+    r: 2.6,
+    fill: "#FF3B30"
+  }), /*#__PURE__*/React.createElement("circle", {
+    cx: xFor(i),
+    cy: yFor(d.gelir),
+    r: 2.6,
+    fill: "#30A46C"
+  }), /*#__PURE__*/React.createElement("text", {
+    x: xFor(i),
+    y: H - 5,
+    textAnchor: "middle",
+    fontSize: "11",
+    fill: "#6E6E73"
+  }, d.label))));
+}
+function sparklinePoints(values) {
+  if (!values || values.length === 0) return "0,10 100,10";
+  const max = Math.max(...values);
+  const min = Math.min(...values);
+  const range = max - min;
+  if (range === 0) return "0,10 100,10";
+  const n = values.length;
+  return values.map((v, i) => {
+    const x = n <= 1 ? 50 : i / (n - 1) * 100;
+    const y = 18 - (v - min) / range * 16;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(" ");
 }
 const LIGHT_PALETTE = {
   ink: "#1E4A3C",
@@ -1380,6 +1412,11 @@ function Dashboard({
   supplierTx,
   suppliers,
   prescriptions,
+  employees,
+  cards,
+  charges,
+  returnsList,
+  deductions,
   setTab
 }) {
   const income = transactions.filter(t => t.type === "gelir").reduce((s, t) => s + Number(t.amount), 0);
@@ -1419,6 +1456,41 @@ function Dashboard({
   const recent = useMemo(() => {
     return [...transactions].sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 6);
   }, [transactions]);
+  const cardPending = useMemo(() => {
+    const rows = [];
+    charges.forEach(c => {
+      installmentsFor(c).forEach(inst => {
+        rows.push({
+          date: inst.date,
+          amount: inst.amount,
+          paid: (c.paidInstallments || []).includes(inst.index)
+        });
+      });
+    });
+    const pending = rows.filter(r => !r.paid);
+    const overdue = pending.filter(r => r.date < todayStr());
+    return {
+      pendingTotal: pending.reduce((s, r) => s + r.amount, 0),
+      overdueTotal: overdue.reduce((s, r) => s + r.amount, 0)
+    };
+  }, [charges]);
+  const payrollTotal = useMemo(() => employees.reduce((s, e) => s + Number(e.salary || 0), 0), [employees]);
+  const returnsTotal = useMemo(() => returnsList.reduce((s, r) => s + Number(r.amount || 0), 0), [returnsList]);
+  const deductionsTotal = useMemo(() => deductions.reduce((s, d) => s + Number(d.amount || 0), 0), [deductions]);
+  const pendingByInstitution = useMemo(() => INSTITUTIONS.map(i => ({
+    ...i,
+    pending: prescriptions.filter(p => (p.institution || "SGK") === i.key && p.status === "bekliyor").reduce((s, p) => s + Number(p.amount), 0)
+  })), [prescriptions]);
+  const kasaSeries = useMemo(() => {
+    const netPast = kasa - chartData.reduce((s, m) => s + (m.gelir - m.gider), 0);
+    let run = netPast;
+    return chartData.map(m => {
+      run += m.gelir - m.gider;
+      return run;
+    });
+  }, [chartData, kasa]);
+  const gelirSeries = useMemo(() => chartData.map(m => m.gelir), [chartData]);
+  const fmtShort = n => "₺" + Math.round(Number(n) || 0).toLocaleString("tr-TR");
   const greeting = (() => {
     const h = new Date().getHours();
     if (h < 6) return "İyi geceler";
@@ -1450,111 +1522,141 @@ function Dashboard({
   }, "Eczanenin bugünkü mali durumu, tek bakışta.")), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "grid",
-      gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))",
-      gap: 18
+      gridTemplateColumns: "repeat(5, 1fr)",
+      gap: 14
     }
-  }, /*#__PURE__*/React.createElement(KpiTicket, {
-    icon: CircleDollarSign,
-    label: "Kasa Bakiyesi",
-    value: fmt(kasa),
-    accent: C.accent,
-    sub: "Gelir − Gider",
-    highlight: true
-  }), /*#__PURE__*/React.createElement(KpiTicket, {
-    icon: TrendingUp,
-    label: "Toplam Gelir",
-    value: fmt(income),
-    accent: C.green
-  }), /*#__PURE__*/React.createElement(KpiTicket, {
-    icon: TrendingDown,
-    label: "Toplam Gider",
-    value: fmt(expense),
-    accent: C.red
-  }), /*#__PURE__*/React.createElement(KpiTicket, {
-    icon: Users,
-    label: "Tedarikçi Borcu",
-    value: fmt(totalSupplierDebt),
-    accent: C.amber,
-    sub: `${suppliers.length} tedarikçi`
-  }), /*#__PURE__*/React.createElement(KpiTicket, {
-    icon: Clock,
-    label: "Bekleyen SGK",
-    value: fmt(pendingSgk),
-    accent: C.red,
-    sub: `${prescriptions.filter(p => p.status === 'bekliyor').length} fatura`
-  })), /*#__PURE__*/React.createElement("div", {
+  }, [{
+    key: "kasa",
+    label: "KASA",
+    value: fmtShort(kasa),
+    highlight: true,
+    valueColor: null,
+    points: sparklinePoints(kasaSeries),
+    lineColor: "#ffffff"
+  }, {
+    key: "gelir",
+    label: "GELİR",
+    value: fmtShort(income),
+    valueColor: C.ink,
+    points: sparklinePoints(gelirSeries),
+    lineColor: C.green
+  }, {
+    key: "gider",
+    label: "GİDER",
+    value: fmtShort(expense),
+    valueColor: C.ink,
+    points: sparklinePoints([]),
+    lineColor: C.line
+  }, {
+    key: "tedarikci",
+    label: "TEDARİKÇİ BORCU",
+    value: fmtShort(totalSupplierDebt),
+    valueColor: C.ink,
+    points: sparklinePoints([]),
+    lineColor: C.line
+  }, {
+    key: "sgk",
+    label: "BEKLEYEN SGK",
+    value: fmtShort(pendingSgk),
+    valueColor: C.ink,
+    points: sparklinePoints([]),
+    lineColor: C.line
+  }, {
+    key: "gecikmis",
+    label: "GECİKMİŞ ÖDEME",
+    value: fmtShort(cardPending.overdueTotal),
+    valueColor: C.red,
+    points: sparklinePoints([]),
+    lineColor: C.line
+  }, {
+    key: "bordro",
+    label: "ÇALIŞAN BORDROSU",
+    value: fmtShort(payrollTotal),
+    valueColor: C.ink,
+    points: sparklinePoints([]),
+    lineColor: C.line
+  }, {
+    key: "kart",
+    label: "KART BEKLEYEN",
+    value: fmtShort(cardPending.pendingTotal),
+    valueColor: C.ink,
+    points: sparklinePoints([]),
+    lineColor: C.line
+  }, {
+    key: "iade",
+    label: "İADE TUTARI",
+    value: fmtShort(returnsTotal),
+    valueColor: C.ink,
+    points: sparklinePoints([]),
+    lineColor: C.line
+  }, {
+    key: "kesinti",
+    label: "KESİNTİ TUTARI",
+    value: fmtShort(deductionsTotal),
+    valueColor: C.ink,
+    points: sparklinePoints([]),
+    lineColor: C.line
+  }].map(t => /*#__PURE__*/React.createElement("div", {
+    key: t.key,
     style: {
-      background: C.card,
-      borderRadius: 18,
-      padding: "20px 20px 18px",
-      border: "none",
-      boxShadow: "0 1px 2px rgba(20,20,16,0.03), 0 10px 26px rgba(20,20,16,0.06)"
+      background: t.highlight ? C.accent : C.card,
+      borderRadius: 14,
+      padding: "13px 14px 12px",
+      boxShadow: t.highlight ? "0 8px 20px rgba(231,168,62,0.3)" : "0 1px 2px rgba(20,20,16,0.03), 0 6px 16px rgba(20,20,16,0.05)"
     }
-  }, /*#__PURE__*/React.createElement("h3", {
-    className: "ecz-display",
+  }, /*#__PURE__*/React.createElement("span", {
     style: {
-      fontSize: 15,
+      fontSize: 10,
+      letterSpacing: "0.03em",
+      textTransform: "uppercase",
+      color: t.highlight ? "#ffffffcc" : C.muted,
+      fontWeight: 700
+    }
+  }, t.label), /*#__PURE__*/React.createElement("div", {
+    className: "ecz-mono",
+    style: {
+      fontSize: 17,
       fontWeight: 600,
-      color: C.ink,
-      margin: "0 0 14px"
+      color: t.highlight ? "#fff" : t.valueColor,
+      marginTop: 6
     }
-  }, "Son 6 Ay — Gelir / Gider"), /*#__PURE__*/React.createElement(MiniBarChart, {
-    data: chartData
-  }), /*#__PURE__*/React.createElement("div", {
+  }, t.value), /*#__PURE__*/React.createElement("svg", {
+    width: "100%",
+    height: 20,
+    viewBox: "0 0 100 20",
     style: {
-      display: "flex",
-      gap: 16,
-      marginTop: 10,
-      fontSize: 12,
-      color: C.muted
+      marginTop: 4,
+      display: "block"
     }
-  }, /*#__PURE__*/React.createElement("span", {
+  }, /*#__PURE__*/React.createElement("polyline", {
+    points: t.points,
+    fill: "none",
+    stroke: t.lineColor,
+    strokeWidth: 1.6
+  }))))), /*#__PURE__*/React.createElement("div", {
     style: {
-      display: "flex",
-      alignItems: "center",
-      gap: 5
+      display: "grid",
+      gridTemplateColumns: "1.3fr 1fr 1fr",
+      gap: 14
     }
-  }, /*#__PURE__*/React.createElement("span", {
-    style: {
-      width: 8,
-      height: 8,
-      borderRadius: 2,
-      background: C.green,
-      display: "inline-block"
-    }
-  }), " Gelir"), /*#__PURE__*/React.createElement("span", {
-    style: {
-      display: "flex",
-      alignItems: "center",
-      gap: 5
-    }
-  }, /*#__PURE__*/React.createElement("span", {
-    style: {
-      width: 8,
-      height: 8,
-      borderRadius: 2,
-      background: C.red,
-      display: "inline-block"
-    }
-  }), " Gider"))), /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("div", {
     style: {
       background: C.card,
-      borderRadius: 18,
-      padding: 20,
-      border: "none",
-      boxShadow: "0 1px 2px rgba(20,20,16,0.03), 0 10px 26px rgba(20,20,16,0.06)"
+      borderRadius: 14,
+      padding: "16px 18px",
+      boxShadow: "0 1px 2px rgba(20,20,16,0.03), 0 6px 16px rgba(20,20,16,0.05)"
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       justifyContent: "space-between",
       alignItems: "center",
-      marginBottom: 4
+      marginBottom: 10
     }
   }, /*#__PURE__*/React.createElement("h3", {
     className: "ecz-display",
     style: {
-      fontSize: 15,
+      fontSize: 13.5,
       fontWeight: 600,
       color: C.ink,
       margin: 0
@@ -1565,39 +1667,111 @@ function Dashboard({
       background: "none",
       border: "none",
       color: C.green,
-      fontSize: 12.5,
+      fontSize: 11.5,
       fontWeight: 600,
       cursor: "pointer"
     }
   }, "Tümünü gör →")), recent.length === 0 ? /*#__PURE__*/React.createElement(EmptyState, {
-    text: "Henüz kasa hareketi yok. Kasa sekmesinden ilk hareketini ekle."
-  }) : /*#__PURE__*/React.createElement("div", null, recent.map(t => /*#__PURE__*/React.createElement("div", {
+    text: "Henüz kasa hareketi yok."
+  }) : /*#__PURE__*/React.createElement("div", null, recent.slice(0, 5).map(t => /*#__PURE__*/React.createElement("div", {
     key: t.id,
     style: {
       display: "flex",
       justifyContent: "space-between",
       alignItems: "center",
-      padding: "10px 0",
-      borderBottom: `1px solid ${C.paperDark}`
+      padding: "8px 0",
+      borderTop: `1px solid ${C.paperDark}`
     }
   }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 13.5,
-      fontWeight: 500
+      fontSize: 12.5,
+      fontWeight: 600
     }
   }, t.description || t.category), /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 11.5,
+      fontSize: 11,
       color: C.muted
     }
-  }, t.category, " · ", fmtDate(t.date))), /*#__PURE__*/React.createElement("div", {
+  }, fmtDate(t.date))), /*#__PURE__*/React.createElement("div", {
     className: "ecz-mono",
     style: {
-      fontSize: 13.5,
+      fontSize: 12.5,
       fontWeight: 600,
       color: t.type === "gelir" ? C.green : C.red
     }
-  }, t.type === "gelir" ? "+" : "−", fmt(t.amount)))))));
+  }, t.type === "gelir" ? "+" : "−", fmtShort(t.amount)))))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: C.card,
+      borderRadius: 14,
+      padding: "16px 18px",
+      boxShadow: "0 1px 2px rgba(20,20,16,0.03), 0 6px 16px rgba(20,20,16,0.05)"
+    }
+  }, /*#__PURE__*/React.createElement("h3", {
+    className: "ecz-display",
+    style: {
+      fontSize: 13.5,
+      fontWeight: 600,
+      color: C.ink,
+      margin: "0 0 10px"
+    }
+  }, "Bekleyen Faturalar"), pendingByInstitution.map(i => /*#__PURE__*/React.createElement("div", {
+    key: i.key,
+    style: {
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center",
+      padding: "8px 0",
+      borderTop: `1px solid ${C.paperDark}`
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 12.5,
+      color: C.muted
+    }
+  }, i.key), /*#__PURE__*/React.createElement("span", {
+    className: "ecz-mono",
+    style: {
+      fontSize: 12.5,
+      fontWeight: 600
+    }
+  }, fmtShort(i.pending))))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: C.card,
+      borderRadius: 14,
+      padding: "16px 18px",
+      boxShadow: "0 1px 2px rgba(20,20,16,0.03), 0 6px 16px rgba(20,20,16,0.05)"
+    }
+  }, /*#__PURE__*/React.createElement("h3", {
+    className: "ecz-display",
+    style: {
+      fontSize: 13.5,
+      fontWeight: 600,
+      color: C.ink,
+      margin: "0 0 10px"
+    }
+  }, "Tedarikçi Bakiyeleri"), suppliers.length === 0 ? /*#__PURE__*/React.createElement(EmptyState, {
+    text: "Henüz tedarikçi yok."
+  }) : suppliers.map(s => /*#__PURE__*/React.createElement("div", {
+    key: s.id,
+    style: {
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center",
+      padding: "8px 0",
+      borderTop: `1px solid ${C.paperDark}`
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 12.5,
+      color: C.muted
+    }
+  }, s.name), /*#__PURE__*/React.createElement("span", {
+    className: "ecz-mono",
+    style: {
+      fontSize: 12.5,
+      fontWeight: 600
+    }
+  }, fmtShort(supplierBalance[s.id] || 0)))))));
 }
 
 /* ---------------- KASA / BANKALAR ---------------- */
@@ -7276,6 +7450,11 @@ function App() {
     supplierTx: supplierTx,
     suppliers: suppliers,
     prescriptions: prescriptions,
+    employees: employees,
+    cards: cards,
+    charges: charges,
+    returnsList: returnsList,
+    deductions: deductions,
     setTab: setTab
   }), tab === "kasa" && /*#__PURE__*/React.createElement(KasaBankalarView, {
     accounts: accounts,

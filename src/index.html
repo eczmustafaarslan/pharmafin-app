@@ -446,6 +446,11 @@ const Trash2 = p => /*#__PURE__*/React.createElement(IconBase, p, /*#__PURE__*/R
 }), /*#__PURE__*/React.createElement("path", {
   d: "M10 11v6M14 11v6"
 }));
+const Pencil = p => /*#__PURE__*/React.createElement(IconBase, p, /*#__PURE__*/React.createElement("path", {
+  d: "M14.2 4.3l5.5 5.5L8.4 21.1l-6 0.6 0.6-6z"
+}), /*#__PURE__*/React.createElement("path", {
+  d: "M12.4 6.1l5.5 5.5"
+}));
 const TrendingUp = p => /*#__PURE__*/React.createElement(IconBase, p, /*#__PURE__*/React.createElement("path", {
   d: "M3 17l6.2-6.2L13 14.6 21 6.6"
 }), /*#__PURE__*/React.createElement("path", {
@@ -1476,7 +1481,7 @@ function Dashboard({
     label: "Bekleyen SGK",
     value: fmt(pendingSgk),
     accent: C.red,
-    sub: `${prescriptions.filter(p => p.status === 'bekliyor').length} reçete`
+    sub: `${prescriptions.filter(p => p.status === 'bekliyor').length} fatura`
   })), /*#__PURE__*/React.createElement("div", {
     style: {
       background: C.card,
@@ -1606,6 +1611,7 @@ const ACCOUNT_TYPES = [{
 function HesaplarView({
   accounts,
   addAccount,
+  editAccount,
   removeAccount,
   transactions,
   addTx,
@@ -1614,13 +1620,26 @@ function HesaplarView({
   addTag
 }) {
   const [open, setOpen] = useState(false);
-  const [form, setForm] = useState({
+  const [editingId, setEditingId] = useState(null);
+  const blankForm = {
     name: "",
     type: "kasa",
     bankName: "",
     iban: "",
     openingBalance: ""
-  });
+  };
+  const [form, setForm] = useState(blankForm);
+  const startEdit = acc => {
+    setEditingId(acc.id);
+    setForm({
+      name: acc.name || "",
+      type: acc.type || "kasa",
+      bankName: acc.bankName || "",
+      iban: acc.iban || "",
+      openingBalance: acc.openingBalance ?? ""
+    });
+    setOpen(true);
+  };
   const [activeAcc, setActiveAcc] = useState(null);
   const [txForm, setTxForm] = useState({
     type: "gelir",
@@ -1638,18 +1657,20 @@ function HesaplarView({
   const submitAccount = e => {
     e.preventDefault();
     if (!form.name) return;
-    addAccount({
-      id: uid(),
+    const payload = {
       ...form,
       openingBalance: Number(form.openingBalance || 0)
-    });
-    setForm({
-      name: "",
-      type: "kasa",
-      bankName: "",
-      iban: "",
-      openingBalance: ""
-    });
+    };
+    if (editingId) {
+      editAccount(editingId, payload);
+    } else {
+      addAccount({
+        id: uid(),
+        ...payload
+      });
+    }
+    setForm(blankForm);
+    setEditingId(null);
     setOpen(false);
   };
   const submitTx = e => {
@@ -1694,7 +1715,11 @@ function HesaplarView({
       color: C.ink
     }
   }, fmt(totalBalance))), /*#__PURE__*/React.createElement("button", {
-    onClick: () => setOpen(o => !o),
+    onClick: () => {
+      setEditingId(null);
+      setForm(blankForm);
+      setOpen(o => !o);
+    },
     style: {
       display: "flex",
       alignItems: "center",
@@ -1797,7 +1822,7 @@ function HesaplarView({
       cursor: "pointer",
       width: "100%"
     }
-  }, "Kaydet"))), accounts.length === 0 ? /*#__PURE__*/React.createElement("div", {
+  }, editingId ? "Güncelle" : "Kaydet"))), accounts.length === 0 ? /*#__PURE__*/React.createElement("div", {
     style: {
       background: C.card,
       borderRadius: 18,
@@ -1863,11 +1888,32 @@ function HesaplarView({
         fontWeight: 600,
         fontSize: 14
       }
-    }, acc.name)), /*#__PURE__*/React.createElement("button", {
+    }, acc.name)), /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: "flex",
+        alignItems: "center",
+        gap: 8
+      }
+    }, /*#__PURE__*/React.createElement("button", {
+      onClick: e => {
+        e.stopPropagation();
+        startEdit(acc);
+      },
+      title: "Düzenle",
+      style: {
+        background: "none",
+        border: "none",
+        cursor: "pointer",
+        color: isActive ? "#ffffffaa" : C.muted
+      }
+    }, /*#__PURE__*/React.createElement(Pencil, {
+      size: 13
+    })), /*#__PURE__*/React.createElement("button", {
       onClick: e => {
         e.stopPropagation();
         removeAccount(acc.id);
       },
+      title: "Sil",
       style: {
         background: "none",
         border: "none",
@@ -1876,7 +1922,7 @@ function HesaplarView({
       }
     }, /*#__PURE__*/React.createElement(Trash2, {
       size: 13
-    }))), acc.type === "banka" && acc.bankName && /*#__PURE__*/React.createElement("div", {
+    })))), acc.type === "banka" && acc.bankName && /*#__PURE__*/React.createElement("div", {
       style: {
         fontSize: 11.5,
         color: isActive ? "#ffffff99" : C.muted,
@@ -2375,6 +2421,7 @@ function GunlukSayim({
 function KasaBankalarView({
   accounts,
   addAccount,
+  editAccount,
   removeAccount,
   transactions,
   addTx,
@@ -2445,6 +2492,7 @@ function KasaBankalarView({
   }), " ", label))), subTab === "hesaplar" ? /*#__PURE__*/React.createElement(HesaplarView, {
     accounts: accounts,
     addAccount: addAccount,
+    editAccount: editAccount,
     removeAccount: removeAccount,
     transactions: transactions,
     addTx: addTx,
@@ -2764,6 +2812,7 @@ function GenelGiderler({
 function CalisanMaaslari({
   employees,
   addEmployee,
+  editEmployee,
   removeEmployee,
   transactions,
   addTx,
@@ -2773,11 +2822,22 @@ function CalisanMaaslari({
   accounts
 }) {
   const [openEmp, setOpenEmp] = useState(false);
-  const [empForm, setEmpForm] = useState({
+  const [editingEmpId, setEditingEmpId] = useState(null);
+  const blankEmpForm = {
     name: "",
     position: "",
     salary: ""
-  });
+  };
+  const [empForm, setEmpForm] = useState(blankEmpForm);
+  const startEditEmp = emp => {
+    setEditingEmpId(emp.id);
+    setEmpForm({
+      name: emp.name || "",
+      position: emp.position || "",
+      salary: emp.salary ?? ""
+    });
+    setOpenEmp(true);
+  };
   const [activeEmp, setActiveEmp] = useState(null);
   const [payForm, setPayForm] = useState({
     date: todayStr(),
@@ -2795,16 +2855,20 @@ function CalisanMaaslari({
   const submitEmp = e => {
     e.preventDefault();
     if (!empForm.name || !empForm.salary) return;
-    addEmployee({
-      id: uid(),
+    const payload = {
       ...empForm,
       salary: Number(empForm.salary)
-    });
-    setEmpForm({
-      name: "",
-      position: "",
-      salary: ""
-    });
+    };
+    if (editingEmpId) {
+      editEmployee(editingEmpId, payload);
+    } else {
+      addEmployee({
+        id: uid(),
+        ...payload
+      });
+    }
+    setEmpForm(blankEmpForm);
+    setEditingEmpId(null);
     setOpenEmp(false);
   };
   const submitPay = e => {
@@ -2872,7 +2936,11 @@ function CalisanMaaslari({
       justifyContent: "flex-end"
     }
   }, /*#__PURE__*/React.createElement("button", {
-    onClick: () => setOpenEmp(o => !o),
+    onClick: () => {
+      setEditingEmpId(null);
+      setEmpForm(blankEmpForm);
+      setOpenEmp(o => !o);
+    },
     style: {
       display: "flex",
       alignItems: "center",
@@ -2951,7 +3019,7 @@ function CalisanMaaslari({
       cursor: "pointer",
       width: "100%"
     }
-  }, "Kaydet"))), employees.length === 0 ? /*#__PURE__*/React.createElement("div", {
+  }, editingEmpId ? "Güncelle" : "Kaydet"))), employees.length === 0 ? /*#__PURE__*/React.createElement("div", {
     style: {
       background: C.card,
       borderRadius: 18,
@@ -3003,11 +3071,32 @@ function CalisanMaaslari({
         fontWeight: 600,
         fontSize: 14
       }
-    }, emp.name), /*#__PURE__*/React.createElement("button", {
+    }, emp.name), /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: "flex",
+        alignItems: "center",
+        gap: 8
+      }
+    }, /*#__PURE__*/React.createElement("button", {
+      onClick: e => {
+        e.stopPropagation();
+        startEditEmp(emp);
+      },
+      title: "Düzenle",
+      style: {
+        background: "none",
+        border: "none",
+        cursor: "pointer",
+        color: isActive ? "#ffffffaa" : C.muted
+      }
+    }, /*#__PURE__*/React.createElement(Pencil, {
+      size: 13
+    })), /*#__PURE__*/React.createElement("button", {
       onClick: e => {
         e.stopPropagation();
         removeEmployee(emp.id);
       },
+      title: "Sil",
       style: {
         background: "none",
         border: "none",
@@ -3016,7 +3105,7 @@ function CalisanMaaslari({
       }
     }, /*#__PURE__*/React.createElement(Trash2, {
       size: 13
-    }))), emp.position && /*#__PURE__*/React.createElement("div", {
+    })))), emp.position && /*#__PURE__*/React.createElement("div", {
       style: {
         fontSize: 11.5,
         color: isActive ? "#ffffff99" : C.muted,
@@ -3231,6 +3320,7 @@ function GiderlerView({
   employees,
   addEmployee,
   removeEmployee,
+  editEmployee,
   tags,
   addTag,
   accounts
@@ -3309,6 +3399,7 @@ function GiderlerView({
     employees: employees,
     addEmployee: addEmployee,
     removeEmployee: removeEmployee,
+    editEmployee: editEmployee,
     transactions: transactions,
     addTx: addTx,
     removeTx: removeTx,
@@ -3323,17 +3414,29 @@ function SuppliersView({
   suppliers,
   supplierTx,
   addSupplier,
+  editSupplier,
   removeSupplier,
   addSupplierTx,
   tags,
   addTag
 }) {
   const [openSupplier, setOpenSupplier] = useState(false);
-  const [supplierForm, setSupplierForm] = useState({
+  const [editingSupplierId, setEditingSupplierId] = useState(null);
+  const blankSupplierForm = {
     name: "",
     phone: "",
     note: ""
-  });
+  };
+  const [supplierForm, setSupplierForm] = useState(blankSupplierForm);
+  const startEditSupplier = s => {
+    setEditingSupplierId(s.id);
+    setSupplierForm({
+      name: s.name || "",
+      phone: s.phone || "",
+      note: s.note || ""
+    });
+    setOpenSupplier(true);
+  };
   const [activeSupplier, setActiveSupplier] = useState(null);
   const [txForm, setTxForm] = useState({
     type: "borç",
@@ -3346,15 +3449,16 @@ function SuppliersView({
   const submitSupplier = e => {
     e.preventDefault();
     if (!supplierForm.name) return;
-    addSupplier({
-      id: uid(),
-      ...supplierForm
-    });
-    setSupplierForm({
-      name: "",
-      phone: "",
-      note: ""
-    });
+    if (editingSupplierId) {
+      editSupplier(editingSupplierId, supplierForm);
+    } else {
+      addSupplier({
+        id: uid(),
+        ...supplierForm
+      });
+    }
+    setSupplierForm(blankSupplierForm);
+    setEditingSupplierId(null);
     setOpenSupplier(false);
   };
   const submitTx = e => {
@@ -3402,7 +3506,11 @@ function SuppliersView({
       marginTop: 4
     }
   }, "Cari hesapları ve bakiyeleri takip et.")), /*#__PURE__*/React.createElement("button", {
-    onClick: () => setOpenSupplier(o => !o),
+    onClick: () => {
+      setEditingSupplierId(null);
+      setSupplierForm(blankSupplierForm);
+      setOpenSupplier(o => !o);
+    },
     style: {
       display: "flex",
       alignItems: "center",
@@ -3478,7 +3586,7 @@ function SuppliersView({
       cursor: "pointer",
       width: "100%"
     }
-  }, "Kaydet"))), suppliers.length === 0 ? /*#__PURE__*/React.createElement("div", {
+  }, editingSupplierId ? "Güncelle" : "Kaydet"))), suppliers.length === 0 ? /*#__PURE__*/React.createElement("div", {
     style: {
       background: C.card,
       borderRadius: 18,
@@ -3524,11 +3632,32 @@ function SuppliersView({
         fontWeight: 600,
         fontSize: 14
       }
-    }, s.name), /*#__PURE__*/React.createElement("button", {
+    }, s.name), /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: "flex",
+        alignItems: "center",
+        gap: 8
+      }
+    }, /*#__PURE__*/React.createElement("button", {
+      onClick: e => {
+        e.stopPropagation();
+        startEditSupplier(s);
+      },
+      title: "Düzenle",
+      style: {
+        background: "none",
+        border: "none",
+        cursor: "pointer",
+        color: isActive ? "#ffffffaa" : C.muted
+      }
+    }, /*#__PURE__*/React.createElement(Pencil, {
+      size: 13
+    })), /*#__PURE__*/React.createElement("button", {
       onClick: e => {
         e.stopPropagation();
         removeSupplier(s.id);
       },
+      title: "Sil",
       style: {
         background: "none",
         border: "none",
@@ -3537,7 +3666,7 @@ function SuppliersView({
       }
     }, /*#__PURE__*/React.createElement(Trash2, {
       size: 13
-    }))), /*#__PURE__*/React.createElement("div", {
+    })))), /*#__PURE__*/React.createElement("div", {
       className: "ecz-mono",
       style: {
         marginTop: 6,
@@ -3694,8 +3823,8 @@ function PrescriptionsView({
   const [form, setForm] = useState({
     date: todayStr(),
     institution: "SGK",
-    sgkNo: "",
-    patient: "",
+    invoiceNo: "",
+    description: "",
     amount: "",
     tags: []
   });
@@ -3711,8 +3840,8 @@ function PrescriptionsView({
     setForm({
       date: todayStr(),
       institution: "SGK",
-      sgkNo: "",
-      patient: "",
+      invoiceNo: "",
+      description: "",
       amount: "",
       tags: []
     });
@@ -3748,13 +3877,13 @@ function PrescriptionsView({
       color: C.ink,
       margin: 0
     }
-  }, "SGK / Reçete Takibi"), /*#__PURE__*/React.createElement("p", {
+  }, "SGK / Fatura Takibi"), /*#__PURE__*/React.createElement("p", {
     style: {
       color: C.muted,
       fontSize: 13.5,
       marginTop: 4
     }
-  }, "SGK ve AHSB'ye kesilen reçeteleri ve ödeme durumlarını yönet.")), /*#__PURE__*/React.createElement("button", {
+  }, "SGK ve AHSB'ye kesilen faturaları ve ödeme durumlarını yönet.")), /*#__PURE__*/React.createElement("button", {
     onClick: () => setOpen(o => !o),
     style: {
       display: "flex",
@@ -3773,7 +3902,7 @@ function PrescriptionsView({
     size: 15
   }) : /*#__PURE__*/React.createElement(Plus, {
     size: 15
-  }), " ", open ? "Kapat" : "Reçete Ekle")), /*#__PURE__*/React.createElement("div", {
+  }), " ", open ? "Kapat" : "Fatura Ekle")), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "grid",
       gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))",
@@ -3791,7 +3920,7 @@ function PrescriptionsView({
     accent: C.green
   }), /*#__PURE__*/React.createElement(KpiTicket, {
     icon: FileHeart,
-    label: "Toplam Reçete",
+    label: "Toplam Fatura",
     value: filtered.length,
     accent: C.amber
   }), instBreakdown.map(i => /*#__PURE__*/React.createElement(KpiTicket, {
@@ -3855,22 +3984,23 @@ function PrescriptionsView({
     key: i.key,
     value: i.key
   }, i.label)))), /*#__PURE__*/React.createElement(Field, {
-    label: "Reçete No"
+    label: "Fatura No"
   }, /*#__PURE__*/React.createElement("input", {
     style: inputStyle,
-    value: form.sgkNo,
+    value: form.invoiceNo,
     onChange: e => setForm({
       ...form,
-      sgkNo: e.target.value
+      invoiceNo: e.target.value
     })
   })), /*#__PURE__*/React.createElement(Field, {
-    label: "Hasta Adı"
+    label: "Açıklama"
   }, /*#__PURE__*/React.createElement("input", {
     style: inputStyle,
-    value: form.patient,
+    placeholder: "Örn. Ağustos ayı reçete faturası",
+    value: form.description,
     onChange: e => setForm({
       ...form,
-      patient: e.target.value
+      description: e.target.value
     })
   })), /*#__PURE__*/React.createElement(Field, {
     label: "Tutar (₺)"
@@ -3924,7 +4054,7 @@ function PrescriptionsView({
       overflow: "hidden"
     }
   }, sorted.length === 0 ? /*#__PURE__*/React.createElement(EmptyState, {
-    text: "Henüz reçete kaydı yok."
+    text: "Henüz fatura kaydı yok."
   }) : /*#__PURE__*/React.createElement("table", {
     style: {
       width: "100%",
@@ -3936,7 +4066,7 @@ function PrescriptionsView({
       background: C.paperDark,
       textAlign: "left"
     }
-  }, ["Tarih", "Kurum", "Reçete No", "Hasta", "Tutar", "Durum", ""].map(h => /*#__PURE__*/React.createElement("th", {
+  }, ["Tarih", "Kurum", "Fatura No", "Açıklama", "Tutar", "Durum", ""].map(h => /*#__PURE__*/React.createElement("th", {
     key: h,
     style: {
       padding: "10px 16px",
@@ -3973,12 +4103,12 @@ function PrescriptionsView({
     style: {
       padding: "10px 16px"
     }
-  }, p.sgkNo || "—"), /*#__PURE__*/React.createElement("td", {
+  }, p.invoiceNo || "—"), /*#__PURE__*/React.createElement("td", {
     style: {
       padding: "10px 16px",
       fontWeight: 500
     }
-  }, p.patient || "—", /*#__PURE__*/React.createElement(TagBadges, {
+  }, p.description || "—", /*#__PURE__*/React.createElement(TagBadges, {
     ids: p.tags,
     tags: tags
   })), /*#__PURE__*/React.createElement("td", {
@@ -4025,16 +4155,33 @@ function PrescriptionsView({
 function EtiketlerView({
   tags,
   addTag,
+  editTag,
   removeTag,
   transactions,
   supplierTx,
   prescriptions
 }) {
   const [name, setName] = useState("");
+  const [editingTagId, setEditingTagId] = useState(null);
+  const startEditTag = t => {
+    setEditingTagId(t.id);
+    setName(t.name || "");
+  };
+  const cancelEditTag = () => {
+    setEditingTagId(null);
+    setName("");
+  };
   const submit = e => {
     e.preventDefault();
     if (!name.trim()) return;
-    addTag(name.trim());
+    if (editingTagId) {
+      editTag(editingTagId, {
+        name: name.trim()
+      });
+    } else {
+      addTag(name.trim());
+    }
+    setEditingTagId(null);
     setName("");
   };
   const statFor = tagId => {
@@ -4070,7 +4217,7 @@ function EtiketlerView({
       fontSize: 13.5,
       marginTop: 4
     }
-  }, "Kasa, gider, tedarikçi ve reçete hareketlerini serbestçe etiketleyip gruplayabilirsin.")), /*#__PURE__*/React.createElement("form", {
+  }, "Kasa, gider, tedarikçi ve fatura hareketlerini serbestçe etiketleyip gruplayabilirsin.")), /*#__PURE__*/React.createElement("form", {
     onSubmit: submit,
     style: {
       display: "flex",
@@ -4101,7 +4248,17 @@ function EtiketlerView({
     }
   }, /*#__PURE__*/React.createElement(Plus, {
     size: 14
-  }), " Ekle")), tags.length === 0 ? /*#__PURE__*/React.createElement("div", {
+  }), " ", editingTagId ? "Güncelle" : "Ekle"), editingTagId && /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    onClick: cancelEditTag,
+    style: {
+      background: "none",
+      border: "none",
+      color: C.muted,
+      cursor: "pointer",
+      fontSize: 13
+    }
+  }, "İptal")), tags.length === 0 ? /*#__PURE__*/React.createElement("div", {
     style: {
       background: C.card,
       borderRadius: 18,
@@ -4149,8 +4306,26 @@ function EtiketlerView({
         background: t.color,
         display: "inline-block"
       }
-    }), t.name), /*#__PURE__*/React.createElement("button", {
+    }), t.name), /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: "flex",
+        alignItems: "center",
+        gap: 8
+      }
+    }, /*#__PURE__*/React.createElement("button", {
+      onClick: () => startEditTag(t),
+      title: "Düzenle",
+      style: {
+        background: "none",
+        border: "none",
+        cursor: "pointer",
+        color: C.muted
+      }
+    }, /*#__PURE__*/React.createElement(Pencil, {
+      size: 13
+    })), /*#__PURE__*/React.createElement("button", {
       onClick: () => removeTag(t.id),
+      title: "Sil",
       style: {
         background: "none",
         border: "none",
@@ -4159,7 +4334,7 @@ function EtiketlerView({
       }
     }, /*#__PURE__*/React.createElement(Trash2, {
       size: 13
-    }))), /*#__PURE__*/React.createElement("div", {
+    })))), /*#__PURE__*/React.createElement("div", {
       className: "ecz-mono",
       style: {
         marginTop: 10,
@@ -4173,7 +4348,7 @@ function EtiketlerView({
         color: C.muted,
         marginTop: 4
       }
-    }, s.count, " kasa/gider hareketi", s.supCount ? ` · ${s.supCount} cari hareket` : "", s.rxCount ? ` · ${s.rxCount} reçete` : ""));
+    }, s.count, " kasa/gider hareketi", s.supCount ? ` · ${s.supCount} cari hareket` : "", s.rxCount ? ` · ${s.rxCount} fatura` : ""));
   })));
 }
 
@@ -4357,6 +4532,7 @@ function CardChargeForm({
 function KrediKartlariView({
   cards,
   addCard,
+  editCard,
   removeCard,
   charges,
   addCharge,
@@ -4365,22 +4541,34 @@ function KrediKartlariView({
   suppliers
 }) {
   const [openCard, setOpenCard] = useState(false);
-  const [cardForm, setCardForm] = useState({
+  const blankCardForm = {
     name: "",
     bankName: ""
-  });
+  };
+  const [cardForm, setCardForm] = useState(blankCardForm);
+  const [editingCardId, setEditingCardId] = useState(null);
+  const startEditCard = card => {
+    setEditingCardId(card.id);
+    setCardForm({
+      name: card.name || "",
+      bankName: card.bankName || ""
+    });
+    setOpenCard(true);
+  };
   const [openCharge, setOpenCharge] = useState(false);
   const submitCard = e => {
     e.preventDefault();
     if (!cardForm.name) return;
-    addCard({
-      id: uid(),
-      ...cardForm
-    });
-    setCardForm({
-      name: "",
-      bankName: ""
-    });
+    if (editingCardId) {
+      editCard(editingCardId, cardForm);
+    } else {
+      addCard({
+        id: uid(),
+        ...cardForm
+      });
+    }
+    setCardForm(blankCardForm);
+    setEditingCardId(null);
     setOpenCard(false);
   };
   const allInstallments = useMemo(() => {
@@ -4574,7 +4762,11 @@ function KrediKartlariView({
   }) : /*#__PURE__*/React.createElement(Plus, {
     size: 15
   }), " ", openCharge ? "Kapat" : "Yeni Çekim Ekle"), /*#__PURE__*/React.createElement("button", {
-    onClick: () => setOpenCard(o => !o),
+    onClick: () => {
+      setEditingCardId(null);
+      setCardForm(blankCardForm);
+      setOpenCard(o => !o);
+    },
     style: {
       display: "flex",
       alignItems: "center",
@@ -4643,7 +4835,7 @@ function KrediKartlariView({
       cursor: "pointer",
       width: "100%"
     }
-  }, "Kaydet"))), openCharge && (cards.length === 0 ? /*#__PURE__*/React.createElement("div", {
+  }, editingCardId ? "Güncelle" : "Kaydet"))), openCharge && (cards.length === 0 ? /*#__PURE__*/React.createElement("div", {
     style: {
       background: C.card,
       borderRadius: 18,
@@ -4706,7 +4898,19 @@ function KrediKartlariView({
       color: C.muted
     }
   }, "· ", card.bankName), /*#__PURE__*/React.createElement("button", {
+    onClick: () => startEditCard(card),
+    title: "Düzenle",
+    style: {
+      background: "none",
+      border: "none",
+      cursor: "pointer",
+      color: C.muted
+    }
+  }, /*#__PURE__*/React.createElement(Pencil, {
+    size: 13
+  })), /*#__PURE__*/React.createElement("button", {
     onClick: () => removeCard(card.id),
+    title: "Sil",
     style: {
       background: "none",
       border: "none",
@@ -4854,7 +5058,7 @@ function KesintilerView({
       fontSize: 13.5,
       marginTop: 4
     }
-  }, "SGK/reçete kaynaklı kesintileri ve nedenlerini takip et.")), /*#__PURE__*/React.createElement("button", {
+  }, "SGK/fatura kaynaklı kesintileri ve nedenlerini takip et.")), /*#__PURE__*/React.createElement("button", {
     onClick: () => setOpen(o => !o),
     style: {
       display: "flex",
@@ -4947,7 +5151,7 @@ function KesintilerView({
       amount: e.target.value
     })
   })), /*#__PURE__*/React.createElement(Field, {
-    label: "Bağlı Reçete (opsiyonel)"
+    label: "Bağlı Fatura (opsiyonel)"
   }, React.createElement("select", {
     style: inputStyle,
     value: form.prescriptionId || "",
@@ -4959,7 +5163,7 @@ function KesintilerView({
     (prescriptions || []).map(p => React.createElement("option", {
       key: p.id,
       value: p.id
-    }, `${p.patient || p.institution || "Reçete"} - ${fmt(Number(p.amount)||0)} - ${fmtDate(p.date)}`))
+    }, `${p.description || p.institution || "Fatura"} - ${fmt(Number(p.amount)||0)} - ${fmtDate(p.date)}`))
   ))), React.createElement(Field, {
     label: "Kullanıcı Adı (Bilgisayar)"
   }, /*#__PURE__*/React.createElement("input", {
@@ -5084,7 +5288,7 @@ function KesintilerView({
       padding: "10px 16px",
       fontWeight: 500
     }
-  }, d.reason || "—", /*#__PURE__*/(function(){ var lp = (prescriptions || []).find(function(p){ return p.id === d.prescriptionId; }); return lp ? React.createElement("div", { style: { fontSize: 11.5, color: C.muted, marginTop: 2 } }, "Reçete: " + (lp.patient || lp.institution || "")) : null; })(), (function(){ var lp = (prescriptions || []).find(function(p){ return p.id === d.prescriptionId; }); return lp ? React.createElement("div", { style: { fontSize: 11.5, color: C.muted, marginTop: 2 } }, "Reçete: " + (lp.patient || lp.institution || "")) : null; })(), React.createElement(TagBadges, {
+  }, d.reason || "—", /*#__PURE__*/(function(){ var lp = (prescriptions || []).find(function(p){ return p.id === d.prescriptionId; }); return lp ? React.createElement("div", { style: { fontSize: 11.5, color: C.muted, marginTop: 2 } }, "Fatura: " + (lp.description || lp.institution || "")) : null; })(), (function(){ var lp = (prescriptions || []).find(function(p){ return p.id === d.prescriptionId; }); return lp ? React.createElement("div", { style: { fontSize: 11.5, color: C.muted, marginTop: 2 } }, "Fatura: " + (lp.description || lp.institution || "")) : null; })(), React.createElement(TagBadges, {
     ids: d.tags,
     tags: tags
   })), /*#__PURE__*/React.createElement("td", {
@@ -5918,6 +6122,16 @@ function App() {
       return next;
     });
   }, []);
+  const editSupplier = useCallback((id, patch) => {
+    setSuppliers(prev => {
+      const next = prev.map(s => s.id === id ? {
+        ...s,
+        ...patch
+      } : s);
+      saveKey("ecz-suppliers", next);
+      return next;
+    });
+  }, []);
   const addSupplierTx = useCallback(t => {
     setSupplierTx(prev => {
       const next = [...prev, t];
@@ -5973,7 +6187,7 @@ function App() {
           category: updated.institution === "SGK" ? "SGK Tahsilatı" : "AHSB Tahsilatı",
           date: todayStr(),
           amount: Number(updated.amount),
-          description: `${updated.institution}${updated.sgkNo ? " — " + updated.sgkNo : ""}${updated.patient ? " (" + updated.patient + ")" : ""}`,
+          description: `${updated.institution}${updated.invoiceNo ? " — " + updated.invoiceNo : ""}${updated.description ? " (" + updated.description + ")" : ""}`,
           tags: []
         });
       } else if (updated && updated.status === "bekliyor") {
@@ -6008,11 +6222,31 @@ function App() {
       return next;
     });
   }, []);
+  const editEmployee = useCallback((id, patch) => {
+    setEmployees(prev => {
+      const next = prev.map(e => e.id === id ? {
+        ...e,
+        ...patch
+      } : e);
+      saveKey("ecz-employees", next);
+      return next;
+    });
+  }, []);
   const addAccount = useCallback(a => setAccounts(prev => {
     const next = [...prev, a];
     saveKey("ecz-accounts", next);
     return next;
   }), []);
+  const editAccount = useCallback((id, patch) => {
+    setAccounts(prev => {
+      const next = prev.map(a => a.id === id ? {
+        ...a,
+        ...patch
+      } : a);
+      saveKey("ecz-accounts", next);
+      return next;
+    });
+  }, []);
   const removeAccount = useCallback(id => {
     setAccounts(prev => {
       const next = prev.filter(a => a.id !== id);
@@ -6054,6 +6288,16 @@ function App() {
     setTransactions(prev => {
       const next = prev.filter(t => t.cardId !== id);
       saveKey("ecz-transactions", next);
+      return next;
+    });
+  }, []);
+  const editCard = useCallback((id, patch) => {
+    setCards(prev => {
+      const next = prev.map(c => c.id === id ? {
+        ...c,
+        ...patch
+      } : c);
+      saveKey("ecz-cards", next);
       return next;
     });
   }, []);
@@ -6213,6 +6457,16 @@ function App() {
         name,
         color
       }];
+      saveKey("ecz-tags", next);
+      return next;
+    });
+  }, []);
+  const editTag = useCallback((id, patch) => {
+    setTags(prev => {
+      const next = prev.map(t => t.id === id ? {
+        ...t,
+        ...patch
+      } : t);
       saveKey("ecz-tags", next);
       return next;
     });
@@ -6409,13 +6663,13 @@ function App() {
       message: `Bugün ${todayInst.length} kart ödeme günü (${fmt(todayInst.reduce((s, i) => s + i.amount, 0))})`
     });
 
-    // SGK / Reçete
+    // SGK / Fatura
     const pendingRx = prescriptions.filter(p => p.status === "bekliyor");
     if (pendingRx.length) list.push({
       id: "sgk-bekleyen",
       tab: "sgk",
       level: "amber",
-      message: `${pendingRx.length} bekleyen SGK reçetesi (${fmt(pendingRx.reduce((s, p) => s + Number(p.amount), 0))})`
+      message: `${pendingRx.length} bekleyen SGK faturası (${fmt(pendingRx.reduce((s, p) => s + Number(p.amount), 0))})`
     });
 
     // Günlük sayım
@@ -6572,7 +6826,7 @@ function App() {
     icon: Users
   }, {
     key: "sgk",
-    label: "SGK / Reçete",
+    label: "SGK / Fatura",
     icon: FileHeart
   }, {
     key: "kartlar",
@@ -7026,6 +7280,7 @@ function App() {
   }), tab === "kasa" && /*#__PURE__*/React.createElement(KasaBankalarView, {
     accounts: accounts,
     addAccount: addAccount,
+    editAccount: editAccount,
     removeAccount: removeAccount,
     transactions: transactions,
     addTx: addTx,
@@ -7041,6 +7296,7 @@ function App() {
     removeTx: removeTx,
     employees: employees,
     addEmployee: addEmployee,
+    editEmployee: editEmployee,
     removeEmployee: removeEmployee,
     tags: tags,
     addTag: addTag,
@@ -7049,6 +7305,7 @@ function App() {
     suppliers: suppliers,
     supplierTx: supplierTx,
     addSupplier: addSupplier,
+    editSupplier: editSupplier,
     removeSupplier: removeSupplier,
     addSupplierTx: addSupplierTx,
     tags: tags,
@@ -7063,6 +7320,7 @@ function App() {
   }), tab === "kartlar" && /*#__PURE__*/React.createElement(KrediKartlariView, {
     cards: cards,
     addCard: addCard,
+    editCard: editCard,
     removeCard: removeCard,
     charges: charges,
     addCharge: addCharge,
@@ -7094,6 +7352,7 @@ function App() {
   }), tab === "etiketler" && /*#__PURE__*/React.createElement(EtiketlerView, {
     tags: tags,
     addTag: addTag,
+    editTag: editTag,
     removeTag: removeTag,
     transactions: transactions,
     supplierTx: supplierTx,

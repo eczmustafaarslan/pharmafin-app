@@ -1,8 +1,8 @@
 [package]
 name = "pharmafin"
 version = "1.0.0"
-description = "Pharmafin - Eczane Finans Yönetimi"
-authors = ["Pharmafin"]
+description = "pharmafin - Eczane Finans Yönetimi"
+authors = ["pharmafin"]
 license = ""
 repository = ""
 edition = "2021"

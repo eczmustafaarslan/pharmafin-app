@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Pharmafin",
+  "productName": "pharmafin",
   "version": "1.0.0",
   "identifier": "com.pharmafin.app",
   "build": {
@@ -10,7 +10,7 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "Pharmafin - Eczane Finans Yönetimi",
+        "title": "pharmafin - Eczane Finans Yönetimi",
         "width": 1280,
         "height": 820,
         "minWidth": 960,

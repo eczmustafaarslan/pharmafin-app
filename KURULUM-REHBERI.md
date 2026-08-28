@@ -66,23 +66,23 @@ tekrar bu depoya sürükleyip bırakacaksın (üzerine yazılacak, sorun değil)
 ## 6) Kurulum
 
 **Mac'te:** İndirilen `.dmg` dosyasına çift tıkla, açılan pencerede
-Pharmafin simgesini "Applications" klasörüne sürükle. İlk açılışta "Apple
+pharmafin simgesini "Applications" klasörüne sürükle. İlk açılışta "Apple
 geliştiriciyi doğrulayamadı" uyarısı çıkarsa: uygulama simgesine **sağ
 tık > Aç**, çıkan pencerede tekrar **Aç** butonuna bas. Bu sadece ilk
 açılışta gerekir.
 
 Bazı Mac'lerde (özellikle M1/M2/M3 gibi Apple Silicon işlemcili olanlarda)
-bunun yerine daha sert bir **"Pharmafin bozuk, çöp kutusuna taşınsın mı"**
+bunun yerine daha sert bir **"pharmafin bozuk, çöp kutusuna taşınsın mı"**
 uyarısı çıkabilir. Uygulama bozuk değildir, imzasız olduğu için macOS böyle
 diyor — şu adımlarla açılır:
 
-1. Pharmafin.app'i Applications klasörüne taşıdığından emin ol.
+1. pharmafin.app'i Applications klasörüne taşıdığından emin ol.
 2. **Cmd + Boşluk** tuşlarına bas, `Terminal` yaz, Enter'a bas.
 3. Açılan pencereye şunu yazıp Enter'a bas:
    ```
-   xattr -cr /Applications/Pharmafin.app
+   xattr -cr /Applications/pharmafin.app
    ```
-4. Pharmafin'i tekrar açmayı dene, bu sefer açılacaktır.
+4. pharmafin'i tekrar açmayı dene, bu sefer açılacaktır.
 
 Bu adım her yeni sürüm indirişinde (dosya her indirildiğinde macOS'un
 eklediği "internetten indirildi" işareti yüzünden) tekrar gerekebilir —
@@ -104,9 +104,9 @@ indirip 6. adımdaki gibi kurabilir.
 Uygulamayı hangi bilgisayara kurarsan kur, içindeki **"Otomatik Kayıt"**
 butonuna basıp Google Drive/iCloud gibi bulutla senkron olan bir klasör
 içinde **aynı isimde bir dosya** seçmen yeterli (örn. her iki bilgisayarda
-da `Google Drive/Pharmafin/pharmafin-veri.json`). Bir bilgisayarda yapılan
+da `Google Drive/pharmafin/pharmafin-veri.json`). Bir bilgisayarda yapılan
 değişiklik bulut klasörü aracılığıyla diğer dosyaya ulaştığında, açık duran
-diğer Pharmafin penceresi bunu birkaç saniye içinde otomatik fark edip kendi
+diğer pharmafin penceresi bunu birkaç saniye içinde otomatik fark edip kendi
 ekranını günceller — ekstra bir "Geri Yükle" işlemi yapmana gerek yok.
 
 ---

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Pharmafin</title>
+<title>pharmafin</title>
 <style>
   html, body { margin: 0; padding: 0; background: #E7EFEA; }
   * { box-sizing: border-box; }
@@ -908,7 +908,7 @@ function collectSyncPayload() {
   });
   return {
     exportedAt: new Date().toISOString(),
-    app: "Pharmafin",
+    app: "pharmafin",
     version: 1,
     data
   };
@@ -1022,7 +1022,7 @@ async function fsConnectBrowser() {
     const handle = await window.showSaveFilePicker({
       suggestedName: "pharmafin-veri.json",
       types: [{
-        description: "Pharmafin Veri Dosyası",
+        description: "pharmafin Veri Dosyası",
         accept: {
           "application/json": [".json"]
         }
@@ -1114,7 +1114,7 @@ async function fsConnectTauri() {
     const path = await window.__TAURI__.dialog.save({
       defaultPath: "pharmafin-veri.json",
       filters: [{
-        name: "Pharmafin Veri Dosyası",
+        name: "pharmafin Veri Dosyası",
         extensions: ["json"]
       }]
     });
@@ -3394,7 +3394,8 @@ function CalisanMaaslari({
   const blankEmpForm = {
     name: "",
     position: "",
-    salary: ""
+    salary: "",
+    hireDate: ""
   };
   const [empForm, setEmpForm] = useState(blankEmpForm);
   const startEditEmp = emp => {
@@ -3402,7 +3403,8 @@ function CalisanMaaslari({
     setEmpForm({
       name: emp.name || "",
       position: emp.position || "",
-      salary: emp.salary ?? ""
+      salary: emp.salary ?? "",
+      hireDate: emp.hireDate || ""
     });
     setOpenEmp(true);
   };
@@ -3655,6 +3657,16 @@ function CalisanMaaslari({
     onChange: e => setEmpForm({
       ...empForm,
       salary: e.target.value
+    })
+  })), /*#__PURE__*/React.createElement(Field, {
+    label: "İşe Başlama Tarihi"
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "date",
+    style: inputStyle,
+    value: empForm.hireDate,
+    onChange: e => setEmpForm({
+      ...empForm,
+      hireDate: e.target.value
     })
   })), /*#__PURE__*/React.createElement("div", {
     style: {
@@ -6921,6 +6933,37 @@ function dayCount(start, end) {
     e = new Date(end);
   return Math.max(1, Math.round((e - s) / 86400000) + 1);
 }
+/* 4857 sayılı İş Kanunu Madde 53: kıdeme göre yıllık ücretli izin süresi.
+   1-5 yıl (5 dahil): 14 gün · 5-15 yıl arası: 20 gün · 15 yıl ve üzeri: 26 gün.
+   1 yılını doldurmamış çalışan henüz izin hakkı kazanmamıştır. */
+function kidemYili(hireDate, asOf) {
+  const start = new Date(hireDate);
+  const now = asOf ? new Date(asOf) : new Date();
+  let years = now.getFullYear() - start.getFullYear();
+  const monthDiff = now.getMonth() - start.getMonth();
+  if (monthDiff < 0 || (monthDiff === 0 && now.getDate() < start.getDate())) years--;
+  return years;
+}
+function yillikIzinHakEdilenGun(hireDate) {
+  if (!hireDate) return null;
+  const kidem = kidemYili(hireDate);
+  if (kidem < 1) return {
+    kidem,
+    gun: 0
+  };
+  if (kidem <= 5) return {
+    kidem,
+    gun: 14
+  };
+  if (kidem < 15) return {
+    kidem,
+    gun: 20
+  };
+  return {
+    kidem,
+    gun: 26
+  };
+}
 function IzinlerView({
   leaves,
   addLeave,
@@ -6982,17 +7025,29 @@ function IzinlerView({
   const yillikGunThisYear = leaves.filter(l => l.type === "yillik" && l.startDate.slice(0, 4) === thisYear).reduce((s, l) => s + dayCount(l.startDate, l.endDate), 0);
   const byEmployee = useMemo(() => {
     const map = {};
+    employees.forEach(e => {
+      map[e.id] = {
+        yillik: 0,
+        raporlu: 0,
+        diger: 0,
+        yillikBuYil: 0
+      };
+    });
     leaves.forEach(l => {
       const key = l.employeeId;
       if (!map[key]) map[key] = {
         yillik: 0,
         raporlu: 0,
-        diger: 0
+        diger: 0,
+        yillikBuYil: 0
       };
       map[key][l.type] = (map[key][l.type] || 0) + dayCount(l.startDate, l.endDate);
+      if (l.type === "yillik" && l.startDate.slice(0, 4) === thisYear) {
+        map[key].yillikBuYil += dayCount(l.startDate, l.endDate);
+      }
     });
     return Object.entries(map);
-  }, [leaves]);
+  }, [leaves, employees, thisYear]);
   return /*#__PURE__*/React.createElement("div", {
     className: "fadein",
     style: {
@@ -7201,33 +7256,65 @@ function IzinlerView({
       flexWrap: "wrap",
       gap: 10
     }
-  }, byEmployee.map(([empId, s]) => /*#__PURE__*/React.createElement("div", {
-    key: empId,
+  }, byEmployee.map(([empId, s]) => {
+    const emp = employees.find(e => e.id === empId);
+    const hak = emp ? yillikIzinHakEdilenGun(emp.hireDate) : null;
+    const kalan = hak ? hak.gun - (s.yillikBuYil || 0) : null;
+    return /*#__PURE__*/React.createElement("div", {
+      key: empId,
+      style: {
+        border: `1px solid ${C.line}`,
+        borderRadius: 10,
+        padding: "8px 14px"
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 13,
+        fontWeight: 600
+      }
+    }, empName(empId)), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 11.5,
+        color: C.muted,
+        marginTop: 2
+      }
+    }, "Yıllık: ", /*#__PURE__*/React.createElement("b", {
+      style: {
+        color: C.green
+      }
+    }, s.yillik || 0, "g"), " · Raporlu: ", /*#__PURE__*/React.createElement("b", {
+      style: {
+        color: C.red
+      }
+    }, s.raporlu || 0, "g"), s.diger ? ` · Diğer: ${s.diger}g` : ""), hak ? /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 11.5,
+        color: C.muted,
+        marginTop: 2
+      }
+    }, `${thisYear} hak edilen: `, /*#__PURE__*/React.createElement("b", {
+      style: {
+        color: C.ink
+      }
+    }, hak.gun, "g"), ` (kıdem: ${hak.kidem} yıl) · Kalan: `, /*#__PURE__*/React.createElement("b", {
+      style: {
+        color: kalan < 0 ? C.red : C.green
+      }
+    }, kalan, "g")) : /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 11,
+        color: C.muted,
+        marginTop: 2,
+        fontStyle: "italic"
+      }
+    }, "İşe başlama tarihi girilmedi — yıllık izin hakkı hesaplanamıyor."));
+  })), /*#__PURE__*/React.createElement("p", {
     style: {
-      border: `1px solid ${C.line}`,
-      borderRadius: 10,
-      padding: "8px 14px"
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 13,
-      fontWeight: 600
-    }
-  }, empName(empId)), /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 11.5,
+      fontSize: 11,
       color: C.muted,
-      marginTop: 2
+      margin: "10px 0 0"
     }
-  }, "Yıllık: ", /*#__PURE__*/React.createElement("b", {
-    style: {
-      color: C.green
-    }
-  }, s.yillik || 0, "g"), " · Raporlu: ", /*#__PURE__*/React.createElement("b", {
-    style: {
-      color: C.red
-    }
-  }, s.raporlu || 0, "g"), s.diger ? ` · Diğer: ${s.diger}g` : ""))))), /*#__PURE__*/React.createElement("div", {
+  }, "4857 sayılı İş Kanunu Madde 53: 1-5 yıl arası (5 dahil) 14 gün · 5-15 yıl arası 20 gün · 15 yıl ve üzeri 26 gün. 18 yaş altı ve 50 yaş üstü çalışanlar en az 20 gün izin hakkına sahiptir.")), /*#__PURE__*/React.createElement("div", {
     style: {
       background: C.card,
       borderRadius: 18,
@@ -8040,7 +8127,7 @@ function App() {
   const exportData = useCallback(() => {
     const payload = {
       exportedAt: new Date().toISOString(),
-      app: "Pharmafin",
+      app: "pharmafin",
       version: 1,
       data: {
         transactions,
@@ -8104,7 +8191,7 @@ function App() {
         alert("Yedek başarıyla geri yüklendi.");
       } catch (err) {
         console.error(err);
-        alert("Dosya okunamadı. Geçerli bir Pharmafin yedek dosyası seçtiğinden emin ol.");
+        alert("Dosya okunamadı. Geçerli bir pharmafin yedek dosyası seçtiğinden emin ol.");
       }
     };
     reader.readAsText(file);
@@ -8125,14 +8212,14 @@ function App() {
     const result = await fsConnect();
     if (!result) return;
     if (result.existingText) {
-      const useExisting = window.confirm("Seçtiğin dosyada zaten Pharmafin verisi var.\n\nTamam: dosyadaki veriyi bu cihaza yükle.\nİptal: bu cihazdaki mevcut veriyi dosyanın üzerine yaz.");
+      const useExisting = window.confirm("Seçtiğin dosyada zaten pharmafin verisi var.\n\nTamam: dosyadaki veriyi bu cihaza yükle.\nİptal: bu cihazdaki mevcut veriyi dosyanın üzerine yaz.");
       if (useExisting) {
         try {
           const parsed = JSON.parse(result.existingText);
           await importDataObject(parsed.data || parsed);
         } catch (err) {
           console.error(err);
-          alert("Dosya okunamadı, geçerli bir Pharmafin veri dosyası değil. Bu cihazdaki veriler dosyaya yazılacak.");
+          alert("Dosya okunamadı, geçerli bir pharmafin veri dosyası değil. Bu cihazdaki veriler dosyaya yazılacak.");
           await fsWriteNow();
         }
       } else {
@@ -8483,7 +8570,7 @@ function App() {
       fontWeight: 600,
       color: C.ink
     }
-  }, "Pharmafin")), /*#__PURE__*/React.createElement("div", {
+  }, "pharmafin")), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       alignItems: "center",

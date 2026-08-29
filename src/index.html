@@ -2559,6 +2559,7 @@ function GunlukSayim({
     paper: "",
     coin: "",
     pos: "",
+    eft: "",
     note: "",
     accountId: defaultAcc
   });
@@ -2570,15 +2571,16 @@ function GunlukSayim({
       paper: c.paper ?? "",
       coin: c.coin ?? "",
       pos: c.pos ?? "",
+      eft: c.eft ?? "",
       note: c.note || "",
       accountId: c.accountId || defaultAcc
     });
     setOpen(true);
   };
-  const liveTotal = (Number(form.kasa) || 0) + (Number(form.paper) || 0) + (Number(form.coin) || 0) + (Number(form.pos) || 0);
+  const liveTotal = (Number(form.kasa) || 0) + (Number(form.pos) || 0) + (Number(form.eft) || 0);
   const submit = e => {
     e.preventDefault();
-    if (!form.kasa && !form.paper && !form.coin && !form.pos) return;
+    if (!form.kasa && !form.paper && !form.coin && !form.pos && !form.eft) return;
     if (editingId) {
       editCount(editingId, {
         date: form.date,
@@ -2587,7 +2589,8 @@ function GunlukSayim({
         kasa: Number(form.kasa) || 0,
         paper: Number(form.paper) || 0,
         coin: Number(form.coin) || 0,
-        pos: Number(form.pos) || 0
+        pos: Number(form.pos) || 0,
+        eft: Number(form.eft) || 0
       });
     } else {
       addCount({
@@ -2598,7 +2601,8 @@ function GunlukSayim({
         kasa: Number(form.kasa) || 0,
         paper: Number(form.paper) || 0,
         coin: Number(form.coin) || 0,
-        pos: Number(form.pos) || 0
+        pos: Number(form.pos) || 0,
+        eft: Number(form.eft) || 0
       });
       if (form.accountId && Number(form.kasa) > 0) {
         addTx({
@@ -2619,6 +2623,7 @@ function GunlukSayim({
       paper: "",
       coin: "",
       pos: "",
+      eft: "",
       note: "",
       accountId: form.accountId
     });
@@ -2629,7 +2634,7 @@ function GunlukSayim({
   const todayD = todayStr();
   const todayEntry = counts.find(c => c.date === todayD);
   const thisMonth = todayD.slice(0, 7);
-  const monthTotal = counts.filter(c => c.date.slice(0, 7) === thisMonth).reduce((s, c) => s + (c.kasa || 0) + c.paper + c.coin + c.pos, 0);
+  const monthTotal = counts.filter(c => c.date.slice(0, 7) === thisMonth).reduce((s, c) => s + (c.kasa || 0) + (c.pos || 0) + (c.eft || 0), 0);
   return /*#__PURE__*/React.createElement("div", {
     className: "fadein",
     style: {
@@ -2646,7 +2651,7 @@ function GunlukSayim({
   }, /*#__PURE__*/React.createElement(KpiTicket, {
     icon: CircleDollarSign,
     label: "Bugünkü Sayım",
-    value: todayEntry ? fmt((todayEntry.kasa || 0) + (todayEntry.pos || 0)) : "—",
+    value: todayEntry ? fmt((todayEntry.kasa || 0) + (todayEntry.pos || 0) + (todayEntry.eft || 0)) : "—",
     accent: C.accent,
     sub: todayEntry ? "Bugün girildi" : "Bugün henüz girilmedi"
   }), /*#__PURE__*/React.createElement(KpiTicket, {
@@ -2743,7 +2748,7 @@ function GunlukSayim({
     key: a.id,
     value: a.id
   }, a.name)))), /*#__PURE__*/React.createElement(Field, {
-    label: "Kağıt Para (₺)"
+    label: "Kağıt Para (₺) — sadece sayım"
   }, /*#__PURE__*/React.createElement("input", {
     type: "number",
     step: "0.01",
@@ -2755,7 +2760,7 @@ function GunlukSayim({
       paper: e.target.value
     })
   })), /*#__PURE__*/React.createElement(Field, {
-    label: "Bozuk Para (₺)"
+    label: "Bozuk Para (₺) — sadece sayım"
   }, /*#__PURE__*/React.createElement("input", {
     type: "number",
     step: "0.01",
@@ -2777,6 +2782,18 @@ function GunlukSayim({
     onChange: e => setForm({
       ...form,
       pos: e.target.value
+    })
+  })), /*#__PURE__*/React.createElement(Field, {
+    label: "Havale/EFT (₺)"
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "number",
+    step: "0.01",
+    style: inputStyle,
+    placeholder: "0.00",
+    value: form.eft,
+    onChange: e => setForm({
+      ...form,
+      eft: e.target.value
     })
   })), /*#__PURE__*/React.createElement(Field, {
     label: "Not"
@@ -2808,7 +2825,7 @@ function GunlukSayim({
       color: C.muted,
       fontWeight: 600
     }
-  }, "Toplam"), /*#__PURE__*/React.createElement("span", {
+  }, "Toplam (Kasa + POS + Havale/EFT)"), /*#__PURE__*/React.createElement("span", {
     className: "ecz-mono",
     style: {
       fontSize: 17,
@@ -2848,7 +2865,7 @@ function GunlukSayim({
       background: C.paperDark,
       textAlign: "left"
     }
-  }, ["Tarih", "Kasa", "Kağıt Para", "Bozuk Para", "POS", "Toplam", "Not", ""].map(h => /*#__PURE__*/React.createElement("th", {
+  }, ["Tarih", "Kasa", "Havale/EFT", "POS", "Kağıt Para", "Bozuk Para", "Toplam", "Not", ""].map(h => /*#__PURE__*/React.createElement("th", {
     key: h,
     style: {
       padding: "10px 16px",
@@ -2876,14 +2893,11 @@ function GunlukSayim({
   }, fmt(c.kasa || 0)), /*#__PURE__*/React.createElement("td", {
     className: "ecz-mono",
     style: {
-      padding: "10px 16px"
+      padding: "10px 16px",
+      color: C.amber,
+      fontWeight: 600
     }
-  }, fmt(c.paper)), /*#__PURE__*/React.createElement("td", {
-    className: "ecz-mono",
-    style: {
-      padding: "10px 16px"
-    }
-  }, fmt(c.coin)), /*#__PURE__*/React.createElement("td", {
+  }, fmt(c.eft || 0)), /*#__PURE__*/React.createElement("td", {
     className: "ecz-mono",
     style: {
       padding: "10px 16px"
@@ -2892,10 +2906,22 @@ function GunlukSayim({
     className: "ecz-mono",
     style: {
       padding: "10px 16px",
+      color: C.muted
+    }
+  }, fmt(c.paper)), /*#__PURE__*/React.createElement("td", {
+    className: "ecz-mono",
+    style: {
+      padding: "10px 16px",
+      color: C.muted
+    }
+  }, fmt(c.coin)), /*#__PURE__*/React.createElement("td", {
+    className: "ecz-mono",
+    style: {
+      padding: "10px 16px",
       fontWeight: 700,
       color: C.ink
     }
-  }, fmt((c.kasa || 0) + c.paper + c.coin + c.pos)), /*#__PURE__*/React.createElement("td", {
+  }, fmt((c.kasa || 0) + (c.pos || 0) + (c.eft || 0))), /*#__PURE__*/React.createElement("td", {
     style: {
       padding: "10px 16px",
       color: C.muted
@@ -6925,6 +6951,9 @@ const IZIN_TURLERI = [{
   key: "raporlu",
   label: "Raporlu"
 }, {
+  key: "dogum",
+  label: "Doğum İzni (Analık)"
+}, {
   key: "diger",
   label: "Diğer"
 }];
@@ -6932,6 +6961,26 @@ function dayCount(start, end) {
   const s = new Date(start),
     e = new Date(end);
   return Math.max(1, Math.round((e - s) / 86400000) + 1);
+}
+/* 4857 sayılı İş Kanunu Madde 74 — 7578 sayılı Kanun'la 1 Mayıs 2026'da güncellenen hali:
+   doğumdan önce 8 hafta (56 gün), doğumdan sonra 16 hafta (112 gün); çoğul gebelikte
+   doğum öncesi süreye 2 hafta eklenir (10 hafta / 70 gün). Toplam: tekil 24 hafta,
+   çoğul 26 hafta. Bitiş, doğum tarihine 16 hafta eklenerek bulunur; uygulamanın diğer
+   tüm izin türlerinde kullandığı dahil-sayım kuralı (dayCount) burada da aynen
+   uygulandığından ekranda görünen gün sayısı (ör. 169) hesap süresinden (168) bir
+   fazla çıkar — bu bilinçli bir tutarlılık tercihidir, hata değildir. */
+function dogumIzniTarihleri(dogumTarihi, cogulGebelik) {
+  if (!dogumTarihi) return null;
+  const d = parseLocalDate(dogumTarihi);
+  if (isNaN(d.getTime())) return null;
+  const start = new Date(d);
+  start.setDate(start.getDate() - (cogulGebelik ? 70 : 56));
+  const end = new Date(d);
+  end.setDate(end.getDate() + 112);
+  return {
+    start: ymd(start),
+    end: ymd(end)
+  };
 }
 /* 4857 sayılı İş Kanunu Madde 53: kıdeme göre yıllık ücretli izin süresi.
    1-5 yıl (5 dahil): 14 gün · 5-15 yıl arası: 20 gün · 15 yıl ve üzeri: 26 gün.
@@ -6981,6 +7030,8 @@ function IzinlerView({
     startDate: todayD,
     endDate: todayD,
     type: "yillik",
+    dogumTarihi: "",
+    cogulGebelik: false,
     note: "",
     tags: []
   });
@@ -6991,11 +7042,26 @@ function IzinlerView({
       startDate: l.startDate || todayD,
       endDate: l.endDate || todayD,
       type: l.type || "yillik",
+      dogumTarihi: l.dogumTarihi || "",
+      cogulGebelik: !!l.cogulGebelik,
       note: l.note || "",
       tags: l.tags || []
     });
     setOpen(true);
   };
+  useEffect(() => {
+    if (form.type === "dogum" && form.dogumTarihi) {
+      const t = dogumIzniTarihleri(form.dogumTarihi, form.cogulGebelik);
+      if (t && (t.start !== form.startDate || t.end !== form.endDate)) {
+        setForm(f => f.type === "dogum" ? {
+          ...f,
+          startDate: t.start,
+          endDate: t.end
+        } : f);
+      }
+    }
+    // eslint-disable-next-line
+  }, [form.type, form.dogumTarihi, form.cogulGebelik]);
   const submit = e => {
     e.preventDefault();
     if (!form.employeeId || !form.startDate || !form.endDate) return;
@@ -7012,6 +7078,8 @@ function IzinlerView({
       startDate: todayD,
       endDate: todayD,
       type: "yillik",
+      dogumTarihi: "",
+      cogulGebelik: false,
       note: "",
       tags: []
     });
@@ -7173,21 +7241,46 @@ function IzinlerView({
   }, IZIN_TURLERI.map(t => /*#__PURE__*/React.createElement("option", {
     key: t.key,
     value: t.key
-  }, t.label)))), /*#__PURE__*/React.createElement(Field, {
-    label: "Başlangıç Tarihi"
+  }, t.label)))), form.type === "dogum" && /*#__PURE__*/React.createElement(Field, {
+    label: "Doğum Tarihi (tahmini/gerçek)"
   }, /*#__PURE__*/React.createElement("input", {
     type: "date",
     style: inputStyle,
+    value: form.dogumTarihi,
+    onChange: e => setForm({
+      ...form,
+      dogumTarihi: e.target.value
+    })
+  })), form.type === "dogum" && /*#__PURE__*/React.createElement(Field, {
+    label: "Çoğul Gebelik mi?"
+  }, /*#__PURE__*/React.createElement("select", {
+    style: inputStyle,
+    value: form.cogulGebelik ? "evet" : "hayir",
+    onChange: e => setForm({
+      ...form,
+      cogulGebelik: e.target.value === "evet"
+    })
+  }, /*#__PURE__*/React.createElement("option", {
+    value: "hayir"
+  }, "Hayır"), /*#__PURE__*/React.createElement("option", {
+    value: "evet"
+  }, "Evet (ikiz/üçüz vb.)"))), /*#__PURE__*/React.createElement(Field, {
+    label: form.type === "dogum" ? "Başlangıç Tarihi (otomatik)" : "Başlangıç Tarihi"
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "date",
+    style: inputStyle,
+    disabled: form.type === "dogum",
     value: form.startDate,
     onChange: e => setForm({
       ...form,
       startDate: e.target.value
     })
   })), /*#__PURE__*/React.createElement(Field, {
-    label: "Bitiş Tarihi"
+    label: form.type === "dogum" ? "Bitiş Tarihi (otomatik)" : "Bitiş Tarihi"
   }, /*#__PURE__*/React.createElement("input", {
     type: "date",
     style: inputStyle,
+    disabled: form.type === "dogum",
     value: form.endDate,
     onChange: e => setForm({
       ...form,
@@ -7212,7 +7305,13 @@ function IzinlerView({
     style: {
       color: C.ink
     }
-  }, dayCount(form.startDate, form.endDate), " gün")), /*#__PURE__*/React.createElement(Field, {
+  }, dayCount(form.startDate, form.endDate), " gün")), form.type === "dogum" && /*#__PURE__*/React.createElement("p", {
+    style: {
+      fontSize: 11,
+      color: C.muted,
+      margin: 0
+    }
+  }, "4857 sayılı İş Kanunu Madde 74 (7578 sayılı Kanun ile 1 Mayıs 2026'dan itibaren): doğumdan önce 8, doğumdan sonra 16 hafta (çoğul gebelikte doğum öncesi 10 hafta) ücretli doğum izni. Tarihler doğum tarihine göre otomatik hesaplanır."), /*#__PURE__*/React.createElement(Field, {
     label: "Etiketler"
   }, /*#__PURE__*/React.createElement(TagPicker, {
     tags: tags,
@@ -7286,7 +7385,18 @@ function IzinlerView({
       style: {
         color: C.red
       }
-    }, s.raporlu || 0, "g"), s.diger ? ` · Diğer: ${s.diger}g` : ""), hak ? /*#__PURE__*/React.createElement("div", {
+    }, s.raporlu || 0, "g"), s.dogum ? ` · Doğum İzni: ${s.dogum}g` : "", s.diger ? ` · Diğer: ${s.diger}g` : ""), activeToday.find(l => l.employeeId === empId && l.type === "dogum") && /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: "inline-block",
+        marginTop: 4,
+        fontSize: 10.5,
+        fontWeight: 700,
+        color: C.amber,
+        background: C.amberSoft,
+        borderRadius: 20,
+        padding: "2px 9px"
+      }
+    }, "🤰 Doğum İzninde"), hak ? /*#__PURE__*/React.createElement("div", {
       style: {
         fontSize: 11.5,
         color: C.muted,

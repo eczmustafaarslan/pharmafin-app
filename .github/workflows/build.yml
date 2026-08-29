@@ -71,7 +71,9 @@ jobs:
 
             - macOS: .dmg dosyasını indirip aç, uygulamayı Applications klasörüne sürükle.
               İlk açılışta "doğrulanamayan geliştirici" uyarısı çıkarsa: uygulama simgesine
-              sağ tık > Aç > tekrar Aç.
+              sağ tık > Aç > tekrar Aç. Eğer bunun yerine "uygulama bozuk, çöp kutusuna
+              taşınmalı" uyarısı çıkarsa (bazı Mac'lerde olabiliyor), Terminal açıp şunu
+              yapıştırıp Enter'a bas: xattr -cr /Applications/pharmafin.app
             - Windows: .msi (veya .exe) yükleyiciyi indirip çalıştır. "Windows bilgisayarınızı
               korudu" uyarısı çıkarsa: Daha fazla bilgi > Yine de çalıştır.
           releaseDraft: false

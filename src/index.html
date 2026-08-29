@@ -434,6 +434,24 @@ const FileHeart = p => /*#__PURE__*/React.createElement(IconBase, p, /*#__PURE__
 }), /*#__PURE__*/React.createElement("path", {
   d: "M12 14.8s-2.6-1.6-2.6-3.4a1.7 1.7 0 0 1 2.6-1.4A1.7 1.7 0 0 1 14.6 11.4c0 1.8-2.6 3.4-2.6 3.4z"
 }));
+const Lock = p => /*#__PURE__*/React.createElement(IconBase, p, /*#__PURE__*/React.createElement("rect", {
+  x: "4.5",
+  y: "10.5",
+  width: "15",
+  height: "10",
+  rx: "2"
+}), /*#__PURE__*/React.createElement("path", {
+  d: "M7.5 10.5V7a4.5 4.5 0 0 1 9 0v3.5"
+}), /*#__PURE__*/React.createElement("circle", {
+  cx: "12",
+  cy: "15.2",
+  r: "1.4"
+}));
+const ShieldCheck = p => /*#__PURE__*/React.createElement(IconBase, p, /*#__PURE__*/React.createElement("path", {
+  d: "M12 2.5l7 3v6c0 5-3 8.3-7 10-4-1.7-7-5-7-10v-6z"
+}), /*#__PURE__*/React.createElement("path", {
+  d: "M8.7 12l2.1 2.2 4.3-4.6"
+}));
 const Plus = p => /*#__PURE__*/React.createElement(IconBase, p, /*#__PURE__*/React.createElement("path", {
   d: "M12 5v14M5 12h14"
 }));
@@ -864,7 +882,9 @@ const SYNC_KEY_MAP = {
   returns: "ecz-returns",
   leaves: "ecz-leaves",
   taskTemplates: "ecz-task-templates",
-  taskStatuses: "ecz-task-statuses"
+  taskStatuses: "ecz-task-statuses",
+  authUsers: "ecz-auth-users",
+  authSettings: "ecz-auth-settings"
 };
 const SYNC_STORAGE_KEYS = new Set(Object.values(SYNC_KEY_MAP));
 const IS_TAURI = typeof window !== "undefined" && !!window.__TAURI__;
@@ -1193,6 +1213,10 @@ function GlobalStyle() {
       @keyframes eczFade { from { opacity: 0; transform: translateY(4px);} to { opacity: 1; transform: translateY(0);} }
       .ecz-scroll::-webkit-scrollbar { width: 6px; }
       .ecz-scroll::-webkit-scrollbar-thumb { background: ${C.line}; border-radius: 4px; }
+      .navscroll { scrollbar-width: thin; scrollbar-color: ${C.line} transparent; }
+      .navscroll::-webkit-scrollbar { height: 5px; }
+      .navscroll::-webkit-scrollbar-thumb { background: ${C.line}; border-radius: 4px; }
+      .navscroll::-webkit-scrollbar-track { background: transparent; }
       .ecz-topbar {
         backdrop-filter: saturate(180%) blur(20px);
         -webkit-backdrop-filter: saturate(180%) blur(20px);
@@ -2548,9 +2572,10 @@ function GunlukSayim({
   editCount,
   removeCount,
   accounts,
-  addTx
+  addTx,
+  girisOnly = false
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(girisOnly);
   const [editingId, setEditingId] = useState(null);
   const defaultAcc = accounts.find(a => a.name.toLowerCase().includes("eczane"))?.id || accounts[0]?.id || "";
   const [form, setForm] = useState({
@@ -2642,7 +2667,21 @@ function GunlukSayim({
       flexDirection: "column",
       gap: 18
     }
-  }, /*#__PURE__*/React.createElement("div", {
+  }, girisOnly && /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 8,
+      background: C.redSoft,
+      color: C.red,
+      borderRadius: 10,
+      padding: "9px 14px",
+      fontSize: 12.5,
+      fontWeight: 600
+    }
+  }, /*#__PURE__*/React.createElement(Lock, {
+    size: 14
+  }), "Geçmiş sayımlar, aylık toplam ve hesap bakiyesi gizli — sadece yeni kayıt girebilirsin."), !girisOnly && /*#__PURE__*/React.createElement("div", {
     style: {
       display: "grid",
       gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))",
@@ -2665,7 +2704,7 @@ function GunlukSayim({
     label: "Son Sayım",
     value: sorted[0] ? fmtDate(sorted[0].date) : "—",
     accent: C.amber
-  })), /*#__PURE__*/React.createElement("div", {
+  })), !girisOnly && /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       justifyContent: "flex-end"
@@ -2844,7 +2883,7 @@ function GunlukSayim({
       fontWeight: 600,
       cursor: "pointer"
     }
-  }, editingId ? "Güncelle" : "Kaydet")), /*#__PURE__*/React.createElement("div", {
+  }, editingId ? "Güncelle" : "Kaydet")), !girisOnly && /*#__PURE__*/React.createElement("div", {
     style: {
       background: C.card,
       borderRadius: 18,
@@ -2976,9 +3015,14 @@ function KasaBankalarView({
   counts,
   addCount,
   editCount,
-  removeCount
+  removeCount,
+  accessLevel = "tam"
 }) {
-  const [subTab, setSubTab] = useState("hesaplar");
+  const girisOnly = accessLevel === "girisonly";
+  const [subTab, setSubTab] = useState(girisOnly ? "sayim" : "hesaplar");
+  useEffect(() => {
+    if (girisOnly) setSubTab("sayim");
+  }, [girisOnly]);
   return /*#__PURE__*/React.createElement("div", {
     className: "fadein",
     style: {
@@ -3000,7 +3044,7 @@ function KasaBankalarView({
       fontSize: 13.5,
       marginTop: 4
     }
-  }, "Hesaplarını yönet ve günlük kasa sayımını gir.")), /*#__PURE__*/React.createElement("div", {
+  }, girisOnly ? "Günlük kasa sayımını gir." : "Hesaplarını yönet ve günlük kasa sayımını gir.")), !girisOnly && /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       gap: 8
@@ -3053,7 +3097,8 @@ function KasaBankalarView({
     editCount: editCount,
     removeCount: removeCount,
     accounts: accounts,
-    addTx: addTx
+    addTx: addTx,
+    girisOnly: girisOnly
   }));
 }
 
@@ -6962,6 +7007,836 @@ function dayCount(start, end) {
     e = new Date(end);
   return Math.max(1, Math.round((e - s) / 86400000) + 1);
 }
+
+/* ---------------- YETKİLENDİRME SİSTEMİ ----------------
+   Kullanıcılar localStorage'da (ecz-auth-users) tutulur: her kullanıcı
+   {id, username, passwordHash, isAdmin, permissions}. Şifreler düz metin
+   olarak DEĞİL, SHA-256 hash'i olarak saklanır (arayüz seviyesinde kilit —
+   uygulamanın sunucusu olmadığından asıl veri diskte şifrelenmiyor, bu
+   bilinen ve kabul edilmiş bir sınırlama).
+   Bölüm bazlı erişim seviyeleri: "gizli" (sekme menüde görünmez),
+   "girisonly" (sadece Kasa/Banka'da desteklenir: sekme görünür ama sadece
+   günlük sayım formu açılır, geçmiş/bakiye gizlenir), "tam" (kısıtlama yok).
+   Admin (isAdmin:true) her zaman tüm bölümlere tam erişimlidir. */
+async function hashPassword(pw) {
+  const enc = new TextEncoder().encode(pw || "");
+  const buf = await crypto.subtle.digest("SHA-256", enc);
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join("");
+}
+const AUTH_SECTIONS = [{
+  key: "panel",
+  label: "Panel",
+  levels: ["gizli", "tam"]
+}, {
+  key: "kasa",
+  label: "Kasa / Banka",
+  levels: ["gizli", "girisonly", "tam"]
+}, {
+  key: "giderler",
+  label: "Giderler",
+  levels: ["gizli", "tam"]
+}, {
+  key: "tedarikci",
+  label: "Tedarikçiler",
+  levels: ["gizli", "tam"]
+}, {
+  key: "sgk",
+  label: "SGK / Fatura",
+  levels: ["gizli", "tam"]
+}, {
+  key: "kartlar",
+  label: "Kredi Kartları",
+  levels: ["gizli", "tam"]
+}, {
+  key: "kesintiler",
+  label: "Kesintiler",
+  levels: ["gizli", "tam"]
+}, {
+  key: "iadeler",
+  label: "İadeler",
+  levels: ["gizli", "tam"]
+}, {
+  key: "izinler",
+  label: "İzinler",
+  levels: ["gizli", "tam"]
+}, {
+  key: "isTakibi",
+  label: "Aylık İş Takibi",
+  levels: ["gizli", "tam"]
+}, {
+  key: "etiketler",
+  label: "Etiketler",
+  levels: ["gizli", "tam"]
+}];
+const PERM_LABELS = {
+  gizli: "Gizli",
+  girisonly: "Sadece Giriş",
+  tam: "Tam Erişim"
+};
+const LOCK_MINUTE_OPTIONS = [2, 5, 10, 30, 0];
+function defaultPermissions() {
+  return Object.fromEntries(AUTH_SECTIONS.map(s => [s.key, "gizli"]));
+}
+function permissionFor(user, sectionKey) {
+  if (!user || user.isAdmin) return "tam";
+  return user.permissions && user.permissions[sectionKey] || "gizli";
+}
+function PasswordField({
+  label,
+  value,
+  onChange,
+  autoFocus
+}) {
+  const [show, setShow] = useState(false);
+  return /*#__PURE__*/React.createElement(Field, {
+    label: label
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      position: "relative"
+    }
+  }, /*#__PURE__*/React.createElement("input", {
+    type: show ? "text" : "password",
+    style: {
+      ...inputStyle,
+      width: "100%",
+      paddingRight: 34
+    },
+    value: value,
+    autoFocus: autoFocus,
+    onChange: e => onChange(e.target.value)
+  }), /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    onClick: () => setShow(s => !s),
+    tabIndex: -1,
+    style: {
+      position: "absolute",
+      right: 4,
+      top: "50%",
+      transform: "translateY(-50%)",
+      border: "none",
+      background: "transparent",
+      cursor: "pointer",
+      color: C.muted,
+      padding: 4,
+      display: "flex"
+    }
+  }, show ? /*#__PURE__*/React.createElement(EyeOff, {
+    size: 15
+  }) : /*#__PURE__*/React.createElement(Eye, {
+    size: 15
+  }))));
+}
+function AuthShell({
+  title,
+  subtitle,
+  children
+}) {
+  return /*#__PURE__*/React.createElement("div", {
+    className: "ecz-root",
+    style: {
+      minHeight: "100vh",
+      background: C.paper,
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      padding: 20
+    }
+  }, /*#__PURE__*/React.createElement(GlobalStyle, null), /*#__PURE__*/React.createElement("div", {
+    style: {
+      width: "100%",
+      maxWidth: 400
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 9,
+      marginBottom: 26
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      width: 38,
+      height: 38,
+      borderRadius: 11,
+      background: C.accent,
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center"
+    }
+  }, /*#__PURE__*/React.createElement(Pill, {
+    size: 19,
+    color: "#fff",
+    strokeWidth: 2.6
+  })), /*#__PURE__*/React.createElement("span", {
+    className: "ecz-display",
+    style: {
+      fontSize: 21,
+      fontWeight: 600,
+      color: C.ink
+    }
+  }, "pharma", /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: C.green
+    }
+  }, "fin"))), /*#__PURE__*/React.createElement("div", {
+    className: "fadein",
+    style: {
+      background: C.card,
+      borderRadius: 20,
+      padding: 28,
+      boxShadow: "0 1px 2px rgba(20,20,16,0.03), 0 10px 26px rgba(20,20,16,0.08)"
+    }
+  }, /*#__PURE__*/React.createElement("h1", {
+    style: {
+      fontSize: 17,
+      fontWeight: 700,
+      color: C.text,
+      margin: "0 0 4px",
+      textAlign: "center"
+    }
+  }, title), subtitle && /*#__PURE__*/React.createElement("p", {
+    style: {
+      fontSize: 12.5,
+      color: C.muted,
+      margin: "0 0 20px",
+      textAlign: "center",
+      lineHeight: 1.5
+    }
+  }, subtitle), children)));
+}
+function AuthSetupScreen({
+  onCreateAdmin
+}) {
+  const [username, setUsername] = useState("Ana Kullanıcı");
+  const [pw, setPw] = useState("");
+  const [pw2, setPw2] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const submit = async e => {
+    e.preventDefault();
+    if (!username.trim()) {
+      setError("Kullanıcı adı gerekli.");
+      return;
+    }
+    if (pw.length < 4) {
+      setError("Şifre en az 4 karakter olmalı.");
+      return;
+    }
+    if (pw !== pw2) {
+      setError("Şifreler eşleşmiyor.");
+      return;
+    }
+    setBusy(true);
+    const passwordHash = await hashPassword(pw);
+    onCreateAdmin({
+      id: uid(),
+      username: username.trim(),
+      passwordHash,
+      isAdmin: true,
+      permissions: null
+    });
+  };
+  return /*#__PURE__*/React.createElement(AuthShell, {
+    title: "Hoş geldin — ilk kurulum",
+    subtitle: "Önce kendi hesabını oluştur. Bu hesap tüm bölümlere tam erişimli olacak ve silinemez; sonra istersen yardımcı kullanıcı (Terminal) ekleyebilirsin."
+  }, /*#__PURE__*/React.createElement("form", {
+    onSubmit: submit,
+    style: {
+      display: "flex",
+      flexDirection: "column",
+      gap: 12
+    }
+  }, /*#__PURE__*/React.createElement(Field, {
+    label: "Kullanıcı Adı"
+  }, /*#__PURE__*/React.createElement("input", {
+    style: inputStyle,
+    value: username,
+    autoFocus: true,
+    onChange: e => setUsername(e.target.value)
+  })), /*#__PURE__*/React.createElement(PasswordField, {
+    label: "Şifre",
+    value: pw,
+    onChange: setPw
+  }), /*#__PURE__*/React.createElement(PasswordField, {
+    label: "Şifre (Tekrar)",
+    value: pw2,
+    onChange: setPw2
+  }), error && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12.5,
+      color: C.red,
+      fontWeight: 600
+    }
+  }, error), /*#__PURE__*/React.createElement("button", {
+    type: "submit",
+    disabled: busy,
+    style: {
+      marginTop: 4,
+      background: C.green,
+      color: "#fff",
+      border: "none",
+      borderRadius: 8,
+      padding: "11px 16px",
+      fontSize: 13.5,
+      fontWeight: 700,
+      cursor: busy ? "default" : "pointer",
+      opacity: busy ? 0.7 : 1
+    }
+  }, busy ? "Oluşturuluyor…" : "Hesabımı Oluştur ve Başla")));
+}
+function AuthLoginScreen({
+  users,
+  presetUserId,
+  relock,
+  onSuccess
+}) {
+  const [selectedId, setSelectedId] = useState(presetUserId && users.some(u => u.id === presetUserId) ? presetUserId : users[0]?.id || "");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const selectedUser = users.find(u => u.id === selectedId) || null;
+  const submit = async e => {
+    e.preventDefault();
+    if (!selectedUser) return;
+    setBusy(true);
+    const hash = await hashPassword(password);
+    setBusy(false);
+    if (hash === selectedUser.passwordHash) {
+      setPassword("");
+      setError("");
+      onSuccess(selectedUser.id);
+    } else {
+      setError("Şifre yanlış.");
+      setPassword("");
+    }
+  };
+  return /*#__PURE__*/React.createElement(AuthShell, {
+    title: relock ? "Oturum kilitlendi" : "Giriş Yap",
+    subtitle: relock ? "Bir süredir işlem yapılmadı. Devam etmek için şifreni gir." : "Devam etmek için kullanıcını seç ve şifreni gir."
+  }, users.length > 1 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 8,
+      flexWrap: "wrap",
+      marginBottom: 16,
+      justifyContent: "center"
+    }
+  }, users.map(u => /*#__PURE__*/React.createElement("button", {
+    key: u.id,
+    type: "button",
+    onClick: () => {
+      setSelectedId(u.id);
+      setError("");
+    },
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 6,
+      padding: "7px 12px",
+      borderRadius: 20,
+      border: `1px solid ${selectedId === u.id ? C.ink : C.line}`,
+      background: selectedId === u.id ? C.ink : C.card,
+      color: selectedId === u.id ? "#fff" : C.text,
+      fontSize: 12.5,
+      fontWeight: 600,
+      cursor: "pointer"
+    }
+  }, u.username, u.isAdmin ? " · Ana Kullanıcı" : ""))), /*#__PURE__*/React.createElement("form", {
+    onSubmit: submit,
+    style: {
+      display: "flex",
+      flexDirection: "column",
+      gap: 12
+    }
+  }, /*#__PURE__*/React.createElement(PasswordField, {
+    label: `${selectedUser?.username || "Kullanıcı"} — Şifre`,
+    value: password,
+    onChange: setPassword,
+    autoFocus: true
+  }), error && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12.5,
+      color: C.red,
+      fontWeight: 600
+    }
+  }, error), /*#__PURE__*/React.createElement("button", {
+    type: "submit",
+    disabled: busy || !selectedUser,
+    style: {
+      marginTop: 4,
+      background: C.green,
+      color: "#fff",
+      border: "none",
+      borderRadius: 8,
+      padding: "11px 16px",
+      fontSize: 13.5,
+      fontWeight: 700,
+      cursor: busy ? "default" : "pointer",
+      opacity: busy ? 0.7 : 1
+    }
+  }, busy ? "Kontrol ediliyor…" : "Giriş Yap")));
+}
+function KullaniciYonetimiModal({
+  users,
+  currentUserId,
+  lockMinutes,
+  onClose,
+  onAddUser,
+  onUpdateUser,
+  onDeleteUser,
+  onChangeLockMinutes
+}) {
+  const [selectedId, setSelectedId] = useState(currentUserId || users[0]?.id || "");
+  const [adding, setAdding] = useState(false);
+  const [newUsername, setNewUsername] = useState("");
+  const [newPw, setNewPw] = useState("");
+  const [newPw2, setNewPw2] = useState("");
+  const [addError, setAddError] = useState("");
+  const [pwChangeValue, setPwChangeValue] = useState("");
+  const [pwChangeValue2, setPwChangeValue2] = useState("");
+  const [pwError, setPwError] = useState("");
+  const [pwSuccess, setPwSuccess] = useState("");
+  const selectedUser = users.find(u => u.id === selectedId) || null;
+  const submitAdd = async e => {
+    e.preventDefault();
+    if (!newUsername.trim()) {
+      setAddError("Kullanıcı adı gerekli.");
+      return;
+    }
+    if (users.some(u => u.username.toLowerCase() === newUsername.trim().toLowerCase())) {
+      setAddError("Bu kullanıcı adı zaten var.");
+      return;
+    }
+    if (newPw.length < 4) {
+      setAddError("Şifre en az 4 karakter olmalı.");
+      return;
+    }
+    if (newPw !== newPw2) {
+      setAddError("Şifreler eşleşmiyor.");
+      return;
+    }
+    const passwordHash = await hashPassword(newPw);
+    const user = {
+      id: uid(),
+      username: newUsername.trim(),
+      passwordHash,
+      isAdmin: false,
+      permissions: defaultPermissions()
+    };
+    onAddUser(user);
+    setSelectedId(user.id);
+    setAdding(false);
+    setNewUsername("");
+    setNewPw("");
+    setNewPw2("");
+    setAddError("");
+  };
+  const submitPwChange = async e => {
+    e.preventDefault();
+    if (!selectedUser) return;
+    if (pwChangeValue.length < 4) {
+      setPwError("Şifre en az 4 karakter olmalı.");
+      return;
+    }
+    if (pwChangeValue !== pwChangeValue2) {
+      setPwError("Şifreler eşleşmiyor.");
+      return;
+    }
+    const passwordHash = await hashPassword(pwChangeValue);
+    onUpdateUser(selectedUser.id, {
+      passwordHash
+    });
+    setPwChangeValue("");
+    setPwChangeValue2("");
+    setPwError("");
+    setPwSuccess("Şifre güncellendi.");
+    setTimeout(() => setPwSuccess(""), 2500);
+  };
+  const setPerm = (sectionKey, level) => {
+    if (!selectedUser || selectedUser.isAdmin) return;
+    onUpdateUser(selectedUser.id, {
+      permissions: {
+        ...(selectedUser.permissions || defaultPermissions()),
+        [sectionKey]: level
+      }
+    });
+  };
+  const removeUser = () => {
+    if (!selectedUser || selectedUser.isAdmin) return;
+    if (window.confirm(`"${selectedUser.username}" kullanıcısı silinsin mi? Bu işlem geri alınamaz.`)) {
+      const remaining = users.filter(u => u.id !== selectedUser.id);
+      onDeleteUser(selectedUser.id);
+      setSelectedId(remaining[0]?.id || "");
+    }
+  };
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      position: "fixed",
+      inset: 0,
+      background: "rgba(10,20,16,0.45)",
+      zIndex: 200,
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      padding: 20
+    },
+    onClick: e => {
+      if (e.target === e.currentTarget) onClose();
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "fadein",
+    style: {
+      background: C.card,
+      borderRadius: 20,
+      padding: 26,
+      width: "100%",
+      maxWidth: 640,
+      maxHeight: "86vh",
+      overflowY: "auto",
+      boxShadow: "0 1px 2px rgba(20,20,16,0.05), 0 20px 50px rgba(20,20,16,0.25)"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "space-between",
+      marginBottom: 18
+    }
+  }, /*#__PURE__*/React.createElement("h2", {
+    className: "ecz-display",
+    style: {
+      fontSize: 19,
+      fontWeight: 600,
+      color: C.ink,
+      margin: 0
+    }
+  }, "Kullanıcılar ve İzinler"), /*#__PURE__*/React.createElement("button", {
+    onClick: onClose,
+    style: {
+      border: "none",
+      background: "transparent",
+      cursor: "pointer",
+      color: C.muted,
+      padding: 6,
+      display: "flex"
+    }
+  }, /*#__PURE__*/React.createElement(X, {
+    size: 18
+  }))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginBottom: 20
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11.5,
+      fontWeight: 700,
+      color: C.muted,
+      textTransform: "uppercase",
+      letterSpacing: ".03em",
+      marginBottom: 8
+    }
+  }, "İşlem yapılmayınca otomatik kilit"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 6,
+      flexWrap: "wrap"
+    }
+  }, LOCK_MINUTE_OPTIONS.map(m => /*#__PURE__*/React.createElement("button", {
+    key: m,
+    type: "button",
+    onClick: () => onChangeLockMinutes(m),
+    style: {
+      padding: "6px 12px",
+      borderRadius: 20,
+      fontSize: 12,
+      fontWeight: 700,
+      cursor: "pointer",
+      border: `1px solid ${lockMinutes === m ? C.ink : C.line}`,
+      background: lockMinutes === m ? C.ink : C.paper,
+      color: lockMinutes === m ? "#fff" : C.muted
+    }
+  }, m === 0 ? "Kapalı" : `${m} dakika`)))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 8,
+      flexWrap: "wrap",
+      marginBottom: 18
+    }
+  }, users.map(u => /*#__PURE__*/React.createElement("button", {
+    key: u.id,
+    type: "button",
+    onClick: () => {
+      setSelectedId(u.id);
+      setAdding(false);
+      setPwError("");
+      setPwSuccess("");
+    },
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 7,
+      padding: "8px 14px",
+      borderRadius: 12,
+      cursor: "pointer",
+      border: `1px solid ${selectedId === u.id && !adding ? C.ink : C.line}`,
+      background: selectedId === u.id && !adding ? C.ink : C.paper,
+      color: selectedId === u.id && !adding ? "#fff" : C.text,
+      fontSize: 12.5,
+      fontWeight: 600
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      width: 18,
+      height: 18,
+      borderRadius: "50%",
+      background: selectedId === u.id && !adding ? "rgba(255,255,255,.25)" : C.ink,
+      color: "#fff",
+      fontSize: 9,
+      fontWeight: 700,
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      flexShrink: 0
+    }
+  }, u.username[0]?.toUpperCase() || "?"), u.username, u.isAdmin && " · Ana Kullanıcı")), /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    onClick: () => setAdding(true),
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 6,
+      padding: "8px 14px",
+      borderRadius: 12,
+      border: `1px dashed ${C.muted}`,
+      background: "transparent",
+      color: C.muted,
+      fontSize: 12.5,
+      fontWeight: 600,
+      cursor: "pointer"
+    }
+  }, /*#__PURE__*/React.createElement(Plus, {
+    size: 14
+  }), " Yeni Kullanıcı")), adding ? /*#__PURE__*/React.createElement("form", {
+    onSubmit: submitAdd,
+    className: "fadein",
+    style: {
+      display: "flex",
+      flexDirection: "column",
+      gap: 12,
+      background: C.paper,
+      borderRadius: 14,
+      padding: 16,
+      marginBottom: 8
+    }
+  }, /*#__PURE__*/React.createElement(Field, {
+    label: "Kullanıcı Adı"
+  }, /*#__PURE__*/React.createElement("input", {
+    style: inputStyle,
+    value: newUsername,
+    placeholder: "Terminal",
+    autoFocus: true,
+    onChange: e => setNewUsername(e.target.value)
+  })), /*#__PURE__*/React.createElement(PasswordField, {
+    label: "Şifre",
+    value: newPw,
+    onChange: setNewPw
+  }), /*#__PURE__*/React.createElement(PasswordField, {
+    label: "Şifre (Tekrar)",
+    value: newPw2,
+    onChange: setNewPw2
+  }), addError && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: C.red,
+      fontWeight: 600
+    }
+  }, addError), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 8
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    type: "submit",
+    style: {
+      background: C.green,
+      color: "#fff",
+      border: "none",
+      borderRadius: 8,
+      padding: "9px 16px",
+      fontSize: 13,
+      fontWeight: 700,
+      cursor: "pointer"
+    }
+  }, "Kullanıcıyı Ekle"), /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    onClick: () => {
+      setAdding(false);
+      setAddError("");
+    },
+    style: {
+      background: "transparent",
+      border: `1px solid ${C.line}`,
+      borderRadius: 8,
+      padding: "9px 16px",
+      fontSize: 13,
+      fontWeight: 600,
+      color: C.muted,
+      cursor: "pointer"
+    }
+  }, "Vazgeç")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11.5,
+      color: C.muted
+    }
+  }, "Yeni kullanıcı varsayılan olarak tüm bölümlerde Gizli olarak başlar — aşağıdan izinlerini ayarla.")) : selectedUser && /*#__PURE__*/React.createElement("div", null, selectedUser.isAdmin ? /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: C.greenSoft,
+      color: C.inkSoft,
+      borderRadius: 10,
+      padding: "10px 14px",
+      fontSize: 12.5,
+      marginBottom: 16,
+      lineHeight: 1.5
+    }
+  }, "Bu hesap Ana Kullanıcı — tüm bölümlere daima tam erişimlidir ve silinemez.") : /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginBottom: 16
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11.5,
+      fontWeight: 700,
+      color: C.muted,
+      textTransform: "uppercase",
+      letterSpacing: ".03em",
+      marginBottom: 10
+    }
+  }, "Bölüm İzinleri"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      flexDirection: "column",
+      gap: 2
+    }
+  }, AUTH_SECTIONS.map(sec => /*#__PURE__*/React.createElement("div", {
+    key: sec.key,
+    style: {
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "space-between",
+      padding: "7px 4px",
+      borderBottom: `1px solid ${C.paperDark}`,
+      gap: 10
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 13,
+      fontWeight: 600,
+      color: C.text
+    }
+  }, sec.label), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 4,
+      flexWrap: "wrap",
+      justifyContent: "flex-end"
+    }
+  }, sec.levels.map(lv => /*#__PURE__*/React.createElement("button", {
+    key: lv,
+    type: "button",
+    onClick: () => setPerm(sec.key, lv),
+    style: {
+      padding: "5px 10px",
+      borderRadius: 20,
+      fontSize: 11,
+      fontWeight: 700,
+      cursor: "pointer",
+      border: "none",
+      background: permissionFor(selectedUser, sec.key) === lv ? lv === "gizli" ? C.redSoft : lv === "girisonly" ? C.amberSoft : C.greenSoft : "transparent",
+      color: permissionFor(selectedUser, sec.key) === lv ? lv === "gizli" ? C.red : lv === "girisonly" ? C.amber : C.green : C.muted
+    }
+  }, PERM_LABELS[lv]))))))), /*#__PURE__*/React.createElement("form", {
+    onSubmit: submitPwChange,
+    style: {
+      display: "flex",
+      flexDirection: "column",
+      gap: 10,
+      borderTop: `1px solid ${C.paperDark}`,
+      paddingTop: 16,
+      marginTop: 4
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11.5,
+      fontWeight: 700,
+      color: C.muted,
+      textTransform: "uppercase",
+      letterSpacing: ".03em"
+    }
+  }, "Şifre Değiştir"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "grid",
+      gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))",
+      gap: 10
+    }
+  }, /*#__PURE__*/React.createElement(PasswordField, {
+    label: "Yeni Şifre",
+    value: pwChangeValue,
+    onChange: setPwChangeValue
+  }), /*#__PURE__*/React.createElement(PasswordField, {
+    label: "Yeni Şifre (Tekrar)",
+    value: pwChangeValue2,
+    onChange: setPwChangeValue2
+  })), pwError && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: C.red,
+      fontWeight: 600
+    }
+  }, pwError), pwSuccess && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: C.green,
+      fontWeight: 600
+    }
+  }, pwSuccess), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center",
+      flexWrap: "wrap",
+      gap: 10
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    type: "submit",
+    style: {
+      background: C.ink,
+      color: "#fff",
+      border: "none",
+      borderRadius: 8,
+      padding: "9px 16px",
+      fontSize: 13,
+      fontWeight: 700,
+      cursor: "pointer"
+    }
+  }, "Şifreyi Güncelle"), !selectedUser.isAdmin && /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    onClick: removeUser,
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 6,
+      background: "transparent",
+      border: "none",
+      color: C.red,
+      fontSize: 12.5,
+      fontWeight: 700,
+      cursor: "pointer"
+    }
+  }, /*#__PURE__*/React.createElement(Trash2, {
+    size: 14
+  }), " Kullanıcıyı Sil"))))));
+}
 /* 4857 sayılı İş Kanunu Madde 74 — 7578 sayılı Kanun'la 1 Mayıs 2026'da güncellenen hali:
    doğumdan önce 8 hafta (56 gün), doğumdan sonra 16 hafta (112 gün); çoğul gebelikte
    doğum öncesi süreye 2 hafta eklenir (10 hafta / 70 gün). Toplam: tekil 24 hafta,
@@ -7593,6 +8468,92 @@ function App() {
       setLoading(false);
     })();
   }, []);
+  /* Yetkilendirme sistemi: kullanıcılar (Ana Kullanıcı + istenildiği kadar
+     Terminal kullanıcı), giriş ekranı, boşta kalınca otomatik kilit ve
+     bölüm bazlı izin matrisi (Gizli / Sadece Giriş / Tam Erişim). Eskiden
+     burada tek-tuş şifresiz "Yardımcı Modu" vardı, yerini bu sistem aldı.
+     NOT: bu blok, App() içindeki diğer birçok yerin (nav filtreleme,
+     exportData, vb.) kullandığı authUsers/currentUser/permFor değerlerini
+     tanımladığından bilinçli olarak fonksiyonun EN BAŞINA yakın tutuluyor —
+     JS'in const/TDZ kuralları yüzünden daha aşağıda tanımlanırsa, onu daha
+     erken satırlarda kullanan yerler "before initialization" hatası verir. */
+  const [authUsers, setAuthUsers] = useState(null);
+  const [authSettings, setAuthSettingsState] = useState({
+    lockMinutes: 5
+  });
+  const [currentUserId, setCurrentUserId] = useState(null);
+  const [authLocked, setAuthLocked] = useState(true);
+  const [usersModalOpen, setUsersModalOpen] = useState(false);
+  useEffect(() => {
+    (async () => {
+      const [u, s] = await Promise.all([loadKey("ecz-auth-users", []), loadKey("ecz-auth-settings", {
+        lockMinutes: 5
+      })]);
+      setAuthUsers(Array.isArray(u) ? u : []);
+      setAuthSettingsState(s && typeof s === "object" ? s : {
+        lockMinutes: 5
+      });
+    })();
+  }, []);
+  const lastActivityRef = useRef(Date.now());
+  useEffect(() => {
+    const bump = () => {
+      lastActivityRef.current = Date.now();
+    };
+    const events = ["mousemove", "mousedown", "keydown", "wheel", "touchstart"];
+    events.forEach(ev => window.addEventListener(ev, bump));
+    const iv = setInterval(() => {
+      const mins = authSettings.lockMinutes || 0;
+      if (!authLocked && currentUserId && mins > 0 && Date.now() - lastActivityRef.current > mins * 60000) {
+        setAuthLocked(true);
+      }
+    }, 15000);
+    return () => {
+      events.forEach(ev => window.removeEventListener(ev, bump));
+      clearInterval(iv);
+    };
+  }, [authLocked, currentUserId, authSettings.lockMinutes]);
+  const currentUser = authUsers ? authUsers.find(u => u.id === currentUserId) || null : null;
+  const permFor = useCallback(key => permissionFor(currentUser, key), [currentUser]);
+  const createAdmin = useCallback(admin => {
+    setAuthUsers([admin]);
+    saveKey("ecz-auth-users", [admin]);
+    setCurrentUserId(admin.id);
+    setAuthLocked(false);
+    lastActivityRef.current = Date.now();
+  }, []);
+  const handleLoginSuccess = useCallback(userId => {
+    setCurrentUserId(userId);
+    setAuthLocked(false);
+    lastActivityRef.current = Date.now();
+  }, []);
+  const lockNow = useCallback(() => setAuthLocked(true), []);
+  const addAuthUser = useCallback(u => setAuthUsers(prev => {
+    const next = [...prev, u];
+    saveKey("ecz-auth-users", next);
+    return next;
+  }), []);
+  const updateAuthUser = useCallback((id, patch) => setAuthUsers(prev => {
+    const next = prev.map(u => u.id === id ? {
+      ...u,
+      ...patch
+    } : u);
+    saveKey("ecz-auth-users", next);
+    return next;
+  }), []);
+  const removeAuthUser = useCallback(id => setAuthUsers(prev => {
+    const next = prev.filter(u => u.id !== id);
+    saveKey("ecz-auth-users", next);
+    return next;
+  }), []);
+  const changeLockMinutes = useCallback(mins => setAuthSettingsState(prev => {
+    const next = {
+      ...prev,
+      lockMinutes: mins
+    };
+    saveKey("ecz-auth-settings", next);
+    return next;
+  }), []);
   const addTx = useCallback(tx => setTransactions(prev => {
     const next = [...prev, tx];
     saveKey("ecz-transactions", next);
@@ -8254,7 +9215,9 @@ function App() {
         returns: returnsList,
         leaves,
         taskTemplates,
-        taskStatuses
+        taskStatuses,
+        authUsers,
+        authSettings
       }
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], {
@@ -8268,7 +9231,7 @@ function App() {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-  }, [transactions, suppliers, supplierTx, prescriptions, employees, accounts, tags, counts, cards, charges, deductions, returnsList, leaves, taskTemplates, taskStatuses]);
+  }, [transactions, suppliers, supplierTx, prescriptions, employees, accounts, tags, counts, cards, charges, deductions, returnsList, leaves, taskTemplates, taskStatuses, authUsers, authSettings]);
   const importDataObject = useCallback(async d => {
     const setAndSave = async (key, setter, value) => {
       const safe = Array.isArray(value) ? value : [];
@@ -8290,6 +9253,17 @@ function App() {
     await setAndSave("ecz-leaves", setLeaves, d.leaves);
     await setAndSave("ecz-task-templates", setTaskTemplates, d.taskTemplates);
     await setAndSave("ecz-task-statuses", setTaskStatuses, d.taskStatuses);
+    // Kullanıcı hesapları: eski bir yedekte bu alan yoksa (veya boşsa) mevcut
+    // kullanıcıları SİLME — yoksa geri yükleme sırasında kimse giriş yapamaz
+    // hale gelebilir. Sadece yedekte gerçekten kullanıcı varsa üzerine yaz.
+    if (Array.isArray(d.authUsers) && d.authUsers.length > 0) {
+      setAuthUsers(d.authUsers);
+      await saveKey("ecz-auth-users", d.authUsers);
+    }
+    if (d.authSettings && typeof d.authSettings === "object") {
+      setAuthSettingsState(d.authSettings);
+      await saveKey("ecz-auth-settings", d.authSettings);
+    }
   }, []);
   const importData = useCallback(file => {
     const reader = new FileReader();
@@ -8513,22 +9487,15 @@ function App() {
       return next;
     });
   }, []);
-  /* Yardımcı Modu: yardımcı eczacıya bilgisayarı verirken hassas
-     sekmeleri (Kasa/Banka, Giderler, Tedarikçiler, SGK/Fatura) menüden
-     gizlemek için basit, şifresiz bir aç/kapa anahtarı. */
-  const RESTRICTED_TABS = ["kasa", "giderler", "tedarikci", "sgk"];
-  const [restrictedMode, setRestrictedMode] = useState(false);
   useEffect(() => {
-    loadKey("ecz-restricted-mode", false).then(setRestrictedMode);
-  }, []);
-  const toggleRestrictedMode = () => setRestrictedMode(v => {
-    saveKey("ecz-restricted-mode", !v);
-    return !v;
-  });
-  useEffect(() => {
-    if (restrictedMode && RESTRICTED_TABS.includes(tab)) setTab("panel");
-  }, [restrictedMode, tab]);
-  const visibleNotifications = restrictedMode ? notifications.filter(n => !RESTRICTED_TABS.includes(n.tab)) : notifications;
+    if (!authUsers || authUsers.length === 0 || authLocked) return;
+    if (permFor(tab) === "gizli") {
+      const first = navItems.find(n => permFor(n.key) !== "gizli");
+      setTab(first ? first.key : "panel");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUserId, authLocked, tab]);
+  const visibleNotifications = notifications.filter(n => permFor(n.tab) !== "gizli");
   const playChime = useCallback(() => {
     try {
       const Ctx = window.AudioContext || window.webkitAudioContext;
@@ -8623,6 +9590,33 @@ function App() {
         fontSize: 13.5
       }
     }, /*#__PURE__*/React.createElement(GlobalStyle, null), "Panel yükleniyor…");
+  }
+  if (authUsers === null) {
+    return /*#__PURE__*/React.createElement("div", {
+      className: "ecz-root",
+      style: {
+        height: "100vh",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        background: C.paper,
+        color: C.muted,
+        fontSize: 13.5
+      }
+    }, /*#__PURE__*/React.createElement(GlobalStyle, null), "Yükleniyor…");
+  }
+  if (authUsers.length === 0) {
+    return /*#__PURE__*/React.createElement(AuthSetupScreen, {
+      onCreateAdmin: createAdmin
+    });
+  }
+  if (authLocked) {
+    return /*#__PURE__*/React.createElement(AuthLoginScreen, {
+      users: authUsers,
+      presetUserId: currentUserId,
+      relock: !!currentUserId,
+      onSuccess: handleLoginSuccess
+    });
   }
   return /*#__PURE__*/React.createElement("div", {
     className: "ecz-root",
@@ -8758,9 +9752,9 @@ function App() {
     }
   }, /*#__PURE__*/React.createElement(CloudSync, {
     size: 14
-  }), " ", syncInfo.label), /*#__PURE__*/React.createElement("button", {
-    onClick: toggleRestrictedMode,
-    title: restrictedMode ? "Yardımcı Modu açık: Kasa/Banka, Giderler, Tedarikçiler, SGK/Fatura sekmeleri gizli. Tekrar tıkla, göster." : "Yardımcı Modu kapalı. Tıkla: Kasa/Banka, Giderler, Tedarikçiler, SGK/Fatura sekmelerini gizle.",
+  }), " ", syncInfo.label), currentUser?.isAdmin && /*#__PURE__*/React.createElement("button", {
+    onClick: () => setUsersModalOpen(true),
+    title: "Kullanıcıları ve izinlerini yönet",
     style: {
       display: "flex",
       alignItems: "center",
@@ -8768,18 +9762,35 @@ function App() {
       height: 34,
       padding: "0 12px",
       borderRadius: 17,
-      border: `1px solid ${restrictedMode ? "transparent" : C.line}`,
-      background: restrictedMode ? C.amber : C.card,
+      border: `1px solid ${C.line}`,
+      background: C.card,
       cursor: "pointer",
       fontSize: 12,
       fontWeight: 600,
-      color: restrictedMode ? "#fff" : C.ink
+      color: C.ink
     }
-  }, restrictedMode ? /*#__PURE__*/React.createElement(EyeOff, {
+  }, /*#__PURE__*/React.createElement(Users, {
     size: 14
-  }) : /*#__PURE__*/React.createElement(Eye, {
+  }), " Kullanıcılar"), /*#__PURE__*/React.createElement("button", {
+    onClick: lockNow,
+    title: "Ekranı hemen kilitle",
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 6,
+      height: 34,
+      padding: "0 12px",
+      borderRadius: 17,
+      border: `1px solid ${C.line}`,
+      background: C.card,
+      cursor: "pointer",
+      fontSize: 12,
+      fontWeight: 600,
+      color: C.ink
+    }
+  }, /*#__PURE__*/React.createElement(Lock, {
     size: 14
-  }), " Yardımcı Modu"), /*#__PURE__*/React.createElement("button", {
+  }), " ", currentUser?.username || "Kilitle"), /*#__PURE__*/React.createElement("button", {
     onClick: toggleSound,
     title: soundOn ? "Bildirim sesini kapat" : "Bildirim sesini aç",
     style: {
@@ -8999,16 +10010,19 @@ function App() {
     month: "long",
     year: "numeric"
   })))), /*#__PURE__*/React.createElement("nav", {
+    className: "navscroll",
     style: {
       display: "flex",
-      flexWrap: "wrap",
+      flexWrap: "nowrap",
+      overflowX: "auto",
+      WebkitOverflowScrolling: "touch",
       alignItems: "center",
       gap: 4,
       background: C.paperDark,
       borderRadius: 12,
       padding: 4
     }
-  }, (restrictedMode ? navItems.filter(n => !RESTRICTED_TABS.includes(n.key)) : navItems).map(({
+  }, navItems.filter(n => permFor(n.key) !== "gizli").map(({
     key,
     label,
     icon: Icon
@@ -9032,6 +10046,7 @@ function App() {
         fontSize: 12.5,
         fontWeight: 500,
         whiteSpace: "nowrap",
+        flexShrink: 0,
         background: active ? C.ink : "transparent",
         color: active ? "#fff" : C.muted,
         boxShadow: active ? "0 1px 3px rgba(0,0,0,0.1)" : "none"
@@ -9069,7 +10084,7 @@ function App() {
     deductions: deductions,
     leaves: leaves,
     setTab: setTab,
-    restrictedMode: restrictedMode
+    restrictedMode: false
   }), tab === "kasa" && /*#__PURE__*/React.createElement(KasaBankalarView, {
     accounts: accounts,
     addAccount: addAccount,
@@ -9085,7 +10100,8 @@ function App() {
     counts: counts,
     addCount: addCount,
     editCount: editCount,
-    removeCount: removeCount
+    removeCount: removeCount,
+    accessLevel: permFor("kasa")
   }), tab === "giderler" && /*#__PURE__*/React.createElement(GiderlerView, {
     transactions: transactions,
     addTx: addTx,
@@ -9131,7 +10147,7 @@ function App() {
     togglePaidInstallment: togglePaidInstallment,
     suppliers: suppliers
   }), tab === "kesintiler" && /*#__PURE__*/React.createElement(KesintilerView, {
-    prescriptions: restrictedMode ? [] : prescriptions,
+    prescriptions: permFor("sgk") === "gizli" ? [] : prescriptions,
     deductions: deductions,
     addDeduction: addDeduction,
     editDeduction: editDeduction,
@@ -9169,7 +10185,16 @@ function App() {
     transactions: transactions,
     supplierTx: supplierTx,
     prescriptions: prescriptions
-  })));
+  })), usersModalOpen && currentUser?.isAdmin && /*#__PURE__*/React.createElement(KullaniciYonetimiModal, {
+    users: authUsers,
+    currentUserId: currentUserId,
+    lockMinutes: authSettings.lockMinutes,
+    onClose: () => setUsersModalOpen(false),
+    onAddUser: addAuthUser,
+    onUpdateUser: updateAuthUser,
+    onDeleteUser: removeAuthUser,
+    onChangeLockMinutes: changeLockMinutes
+  }));
 }
 ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(App));
 </script>

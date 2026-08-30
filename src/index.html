@@ -751,40 +751,40 @@ function sparklinePoints(values) {
   }).join(" ");
 }
 const LIGHT_PALETTE = {
-  ink: "#1E4A3C",
-  inkSoft: "#2C6350",
-  accent: "#E7A83E",
-  accentSoft: "#FBEBCC",
-  paper: "#E7EFEA",
-  paperDark: "#DBE7E0",
+  ink: "#2B2420",
+  inkSoft: "#5C4F45",
+  accent: "#D97757",
+  accentSoft: "#F5DDCB",
+  paper: "#FAF7F2",
+  paperDark: "#F1EAE0",
   card: "#FFFFFF",
-  red: "#D9534F",
-  redSoft: "#F8E3E2",
-  green: "#1F9270",
-  greenSoft: "#DCF1E7",
+  red: "#C74B3F",
+  redSoft: "#F7E2DE",
+  green: "#3E8F6B",
+  greenSoft: "#DFF1E7",
   amber: "#C97B3D",
   amberSoft: "#F3E2D2",
-  line: "#DCE7E1",
-  muted: "#67807A",
-  text: "#18302A"
+  line: "#EAE1D6",
+  muted: "#8A7A6C",
+  text: "#2B2420"
 };
 const DARK_PALETTE = {
-  ink: "#6FDDB0",
-  inkSoft: "#57B693",
-  accent: "#F0B559",
-  accentSoft: "#3A2E16",
-  paper: "#101C18",
-  paperDark: "#0B1512",
-  card: "#182620",
-  red: "#F0736D",
-  redSoft: "#3A1F1E",
-  green: "#3ECB9B",
-  greenSoft: "#12352A",
+  ink: "#F0A878",
+  inkSoft: "#D9916A",
+  accent: "#E38B5D",
+  accentSoft: "#3D2A1C",
+  paper: "#1C1613",
+  paperDark: "#140F0D",
+  card: "#26201B",
+  red: "#E8776C",
+  redSoft: "#3D211D",
+  green: "#5BC79A",
+  greenSoft: "#173328",
   amber: "#D99457",
   amberSoft: "#3A2A18",
-  line: "#28382F",
-  muted: "#8AA69C",
-  text: "#EAF3EF"
+  line: "#3A2F27",
+  muted: "#A6907E",
+  text: "#F2E9E0"
 };
 /* Açık/koyu tema tercihi localStorage'da saklanır, sayfa yeniden
    açıldığında hatırlanır. C bir Proxy: C.ink, C.card gibi kullanımların
@@ -1239,7 +1239,7 @@ function KpiTicket({
       borderRadius: 20,
       padding: "18px 20px 16px",
       border: "none",
-      boxShadow: highlight ? "0 10px 26px rgba(231,168,62,0.32)" : "0 1px 2px rgba(20,20,16,0.03), 0 10px 26px rgba(20,20,16,0.06)",
+      boxShadow: highlight ? "0 10px 26px rgba(217,119,87,0.32)" : "0 1px 2px rgba(20,20,16,0.03), 0 10px 26px rgba(20,20,16,0.06)",
       minWidth: 0
     }
   }, /*#__PURE__*/React.createElement("div", {
@@ -1296,7 +1296,7 @@ function EmptyState({
       padding: "36px 12px",
       textAlign: "center",
       color: C.muted,
-      fontSize: 13.5
+      fontSize: 14
     }
   }, text);
 }
@@ -1304,16 +1304,28 @@ function Field({
   label,
   children
 }) {
+  /* Not: aynı grid satırındaki Field'ların hepsi input'u tam aynı
+     yükseklikte başlatsın diye etiket alanı en az 2 satırlık yer
+     kaplıyor (metin altta hizalı) — "Kağıt Para (₺) — sadece sayım"
+     gibi iki satıra kayan uzun etiketler, "POS Tutarı (₺)" gibi tek
+     satırlık etiketlerin yanında artık input'u aşağı kaydırmıyor. */
   return /*#__PURE__*/React.createElement("label", {
     style: {
       display: "flex",
       flexDirection: "column",
       gap: 5,
-      fontSize: 12.5,
+      fontSize: 13,
       color: C.muted,
       fontWeight: 600
     }
-  }, label, children);
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      display: "flex",
+      alignItems: "flex-end",
+      minHeight: "2.5em",
+      lineHeight: 1.25
+    }
+  }, label), children);
 }
 /* Not: bu nesne script yüklenirken BİR KEZ oluşturuluyor, bu yüzden
    C.line/C.text/C.paper'ı doğrudan burada okumak değerleri o anki temaya
@@ -1324,12 +1336,99 @@ const inputStyle = {
   border: "1px solid var(--ecz-line)",
   borderRadius: 6,
   padding: "8px 10px",
-  fontSize: 13.5,
+  fontSize: 14,
   fontFamily: "Inter, sans-serif",
   color: "var(--ecz-text)",
   background: "var(--ecz-paper)",
   outline: "none"
 };
+
+/* ---------------- TUTAR (₺) GİRİŞİ — muhasebesel biçim ----------------
+   Kullanıcı 10000 yazınca kutuda "10.000" görünsün, kuruş için virgül
+   kullanılsın (10.000,50 gibi). Dışarıya (onChange ile) verdiğimiz ham
+   değer HER ZAMAN eskisi gibi nokta ondalıklı bir sayı string'i
+   ("10000" ya da "1050.5") — böylece bu değeri okuyan tüm Number()/
+   parseFloat() çağrıları hiç değişmeden çalışmaya devam ediyor; sadece
+   kutunun İÇİNDE göründüğü biçim değişiyor. */
+function groupThousands(digits) {
+  return digits.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+}
+function formatTutarForDisplay(raw) {
+  if (raw === null || raw === undefined || raw === "") return "";
+  const s = String(raw);
+  const dotIdx = s.indexOf(".");
+  const intPartRaw = dotIdx === -1 ? s : s.slice(0, dotIdx);
+  const decPartRaw = dotIdx === -1 ? undefined : s.slice(dotIdx + 1);
+  let intDigits = intPartRaw.replace(/\D/g, "");
+  intDigits = intDigits.replace(/^0+(?=\d)/, "");
+  const intGrouped = intDigits ? groupThousands(intDigits) : (decPartRaw !== undefined ? "0" : "");
+  return decPartRaw !== undefined ? `${intGrouped || "0"},${decPartRaw}` : intGrouped;
+}
+function TutarInput({
+  value,
+  onChange,
+  style,
+  placeholder,
+  ...rest
+}) {
+  const ref = React.useRef(null);
+  const display = formatTutarForDisplay(value);
+  const handleChange = e => {
+    const el = e.target;
+    const typed = el.value;
+    const caret = el.selectionStart == null ? typed.length : el.selectionStart;
+    let sigBeforeCaret = 0;
+    let seenComma = false;
+    for (let i = 0; i < caret; i++) {
+      const ch = typed[i];
+      if (ch >= "0" && ch <= "9") sigBeforeCaret++;else if (ch === "," && !seenComma) {
+        sigBeforeCaret++;
+        seenComma = true;
+      }
+    }
+    const withoutDots = typed.replace(/\./g, "");
+    const commaIdx = withoutDots.indexOf(",");
+    let rawForParent;
+    if (commaIdx === -1) {
+      const intDigits = withoutDots.replace(/\D/g, "");
+      rawForParent = intDigits;
+    } else {
+      const intDigits = withoutDots.slice(0, commaIdx).replace(/\D/g, "");
+      const decDigits = withoutDots.slice(commaIdx + 1).replace(/\D/g, "").slice(0, 2);
+      rawForParent = `${intDigits || "0"}.${decDigits}`;
+    }
+    onChange({
+      target: {
+        value: rawForParent
+      }
+    });
+    const newDisplay = formatTutarForDisplay(rawForParent);
+    requestAnimationFrame(() => {
+      if (!ref.current) return;
+      let pos = 0,
+        count = 0;
+      while (pos < newDisplay.length && count < sigBeforeCaret) {
+        const ch = newDisplay[pos];
+        if (ch >= "0" && ch <= "9" || ch === ",") count++;
+        pos++;
+      }
+      try {
+        ref.current.setSelectionRange(pos, pos);
+      } catch (_) {}
+    });
+  };
+  return /*#__PURE__*/React.createElement("input", {
+    ...rest,
+    ref,
+    type: "text",
+    inputMode: "decimal",
+    autoComplete: "off",
+    style: style,
+    placeholder: placeholder,
+    value: display,
+    onChange: handleChange
+  });
+}
 
 /* ---------------- ETİKETLER (ortak) ---------------- */
 const TAG_PALETTE = ["#0071E3", "#30A46C", "#FF3B30", "#FF9F0A", "#8E44AD", "#00A3B4", "#D6336C", "#5E6AD2"];
@@ -1350,7 +1449,7 @@ function TagBadges({
   }, items.map(t => /*#__PURE__*/React.createElement("span", {
     key: t.id,
     style: {
-      fontSize: 10.5,
+      fontSize: 11,
       fontWeight: 600,
       padding: "2px 8px",
       borderRadius: 20,
@@ -1391,7 +1490,7 @@ function TagPicker({
       key: t.id,
       onClick: () => toggle(t.id),
       style: {
-        fontSize: 11.5,
+        fontSize: 12,
         fontWeight: 600,
         padding: "4px 10px",
         borderRadius: 20,
@@ -1415,13 +1514,13 @@ function TagPicker({
     style: {
       ...inputStyle,
       padding: "4px 8px",
-      fontSize: 11.5,
+      fontSize: 12,
       width: 110
     }
   }), /*#__PURE__*/React.createElement("button", {
     type: "submit",
     style: {
-      fontSize: 11.5,
+      fontSize: 12,
       fontWeight: 600,
       padding: "4px 10px",
       borderRadius: 20,
@@ -1434,7 +1533,7 @@ function TagPicker({
     type: "button",
     onClick: () => setCreating(true),
     style: {
-      fontSize: 11.5,
+      fontSize: 12,
       fontWeight: 600,
       padding: "4px 10px",
       borderRadius: 20,
@@ -1562,7 +1661,7 @@ function Dashboard({
   }, greeting, " 👋"), /*#__PURE__*/React.createElement("p", {
     style: {
       color: C.muted,
-      fontSize: 13.5,
+      fontSize: 14,
       marginTop: 4
     }
   }, "Eczanenin bugünkü mali durumu, tek bakışta.")), /*#__PURE__*/React.createElement("div", {
@@ -1648,7 +1747,7 @@ function Dashboard({
       background: t.highlight ? C.accent : C.card,
       borderRadius: 14,
       padding: "13px 14px 12px",
-      boxShadow: t.highlight ? "0 8px 20px rgba(231,168,62,0.3)" : "0 1px 2px rgba(20,20,16,0.03), 0 6px 16px rgba(20,20,16,0.05)"
+      boxShadow: t.highlight ? "0 8px 20px rgba(217,119,87,0.3)" : "0 1px 2px rgba(20,20,16,0.03), 0 6px 16px rgba(20,20,16,0.05)"
     }
   }, /*#__PURE__*/React.createElement("span", {
     style: {
@@ -1702,7 +1801,7 @@ function Dashboard({
   }, /*#__PURE__*/React.createElement("h3", {
     className: "ecz-display",
     style: {
-      fontSize: 13.5,
+      fontSize: 14,
       fontWeight: 600,
       color: C.ink,
       margin: 0
@@ -1713,7 +1812,7 @@ function Dashboard({
       background: "none",
       border: "none",
       color: C.green,
-      fontSize: 11.5,
+      fontSize: 12,
       fontWeight: 600,
       cursor: "pointer"
     }
@@ -1730,7 +1829,7 @@ function Dashboard({
     }
   }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 12.5,
+      fontSize: 13,
       fontWeight: 600
     }
   }, employees.find(e => e.id === l.employeeId)?.name || "—"), /*#__PURE__*/React.createElement("div", {
@@ -1740,7 +1839,7 @@ function Dashboard({
     }
   }, (IZIN_TURLERI.find(it => it.key === l.type) || {}).label || l.type, " · ", fmtDate(l.startDate), " – ", fmtDate(l.endDate))), /*#__PURE__*/React.createElement("span", {
     style: {
-      fontSize: 10.5,
+      fontSize: 11,
       fontWeight: 700,
       padding: "3px 9px",
       borderRadius: 20,
@@ -1758,7 +1857,7 @@ function Dashboard({
     }
   }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 12.5,
+      fontSize: 13,
       fontWeight: 600
     }
   }, employees.find(e => e.id === l.employeeId)?.name || "—"), /*#__PURE__*/React.createElement("div", {
@@ -1768,7 +1867,7 @@ function Dashboard({
     }
   }, (IZIN_TURLERI.find(it => it.key === l.type) || {}).label || l.type, " · ", fmtDate(l.startDate), " – ", fmtDate(l.endDate))), /*#__PURE__*/React.createElement("span", {
     style: {
-      fontSize: 10.5,
+      fontSize: 11,
       fontWeight: 600,
       color: C.muted
     }
@@ -1782,7 +1881,7 @@ function Dashboard({
   }, /*#__PURE__*/React.createElement("h3", {
     className: "ecz-display",
     style: {
-      fontSize: 13.5,
+      fontSize: 14,
       fontWeight: 600,
       color: C.ink,
       margin: "0 0 10px"
@@ -1800,13 +1899,13 @@ function Dashboard({
     }
   }, /*#__PURE__*/React.createElement("span", {
     style: {
-      fontSize: 12.5,
+      fontSize: 13,
       color: C.muted
     }
   }, i.key), /*#__PURE__*/React.createElement("span", {
     className: "ecz-mono",
     style: {
-      fontSize: 12.5,
+      fontSize: 13,
       fontWeight: 600
     }
   }, fmtShort(i.pending))))), /*#__PURE__*/React.createElement("div", {
@@ -1819,7 +1918,7 @@ function Dashboard({
   }, /*#__PURE__*/React.createElement("h3", {
     className: "ecz-display",
     style: {
-      fontSize: 13.5,
+      fontSize: 14,
       fontWeight: 600,
       color: C.ink,
       margin: "0 0 10px"
@@ -1839,13 +1938,13 @@ function Dashboard({
     }
   }, /*#__PURE__*/React.createElement("span", {
     style: {
-      fontSize: 12.5,
+      fontSize: 13,
       color: C.muted
     }
   }, s.name), /*#__PURE__*/React.createElement("span", {
     className: "ecz-mono",
     style: {
-      fontSize: 12.5,
+      fontSize: 13,
       fontWeight: 600
     }
   }, fmtShort(supplierBalance[s.id] || 0)))))), React.createElement("div", {
@@ -1865,7 +1964,7 @@ function Dashboard({
   }, /*#__PURE__*/React.createElement("h3", {
     className: "ecz-display",
     style: {
-      fontSize: 13.5,
+      fontSize: 14,
       fontWeight: 600,
       color: C.ink,
       margin: 0
@@ -1876,7 +1975,7 @@ function Dashboard({
       background: "none",
       border: "none",
       color: C.green,
-      fontSize: 11.5,
+      fontSize: 12,
       fontWeight: 600,
       cursor: "pointer"
     }
@@ -1895,7 +1994,7 @@ function Dashboard({
     }
   }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 12.5,
+      fontSize: 13,
       fontWeight: 600
     }
   }, t.description || t.category), /*#__PURE__*/React.createElement("div", {
@@ -1906,7 +2005,7 @@ function Dashboard({
   }, fmtDate(t.date))), /*#__PURE__*/React.createElement("div", {
     className: "ecz-mono",
     style: {
-      fontSize: 12.5,
+      fontSize: 13,
       fontWeight: 600,
       color: t.type === "gelir" ? C.green : C.red
     }
@@ -2064,7 +2163,7 @@ function HesaplarView({
   }, /*#__PURE__*/React.createElement("div", {
     className: "ecz-mono",
     style: {
-      fontSize: 13.5,
+      fontSize: 14,
       color: C.muted
     }
   }, "Toplam bakiye: ", /*#__PURE__*/React.createElement("b", {
@@ -2177,9 +2276,7 @@ function HesaplarView({
     })
   })), /*#__PURE__*/React.createElement(Field, {
     label: "Tutar (₺)"
-  }, /*#__PURE__*/React.createElement("input", {
-    type: "number",
-    step: "0.01",
+  }, /*#__PURE__*/React.createElement(TutarInput, {
     style: inputStyle,
     value: transferForm.amount,
     onChange: e => setTransferForm({
@@ -2271,9 +2368,7 @@ function HesaplarView({
     })
   }))), /*#__PURE__*/React.createElement(Field, {
     label: "Açılış Bakiyesi (₺)"
-  }, /*#__PURE__*/React.createElement("input", {
-    type: "number",
-    step: "0.01",
+  }, /*#__PURE__*/React.createElement(TutarInput, {
     style: inputStyle,
     placeholder: "0.00",
     value: form.openingBalance,
@@ -2404,7 +2499,7 @@ function HesaplarView({
       size: 13
     })))), acc.type === "banka" && acc.bankName && /*#__PURE__*/React.createElement("div", {
       style: {
-        fontSize: 11.5,
+        fontSize: 12,
         color: isActive ? "#ffffff99" : C.muted,
         marginTop: 3
       }
@@ -2475,9 +2570,7 @@ function HesaplarView({
       ...txForm,
       category: e.target.value
     })
-  }), /*#__PURE__*/React.createElement("input", {
-    type: "number",
-    step: "0.01",
+  }), /*#__PURE__*/React.createElement(TutarInput, {
     style: inputStyle,
     placeholder: "Tutar",
     value: txForm.amount,
@@ -2517,12 +2610,12 @@ function HesaplarView({
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 13.5
+      fontSize: 14
     }
   }, t.category, t.description ? ` — ${t.description}` : "", " ", /*#__PURE__*/React.createElement("span", {
     style: {
       color: C.muted,
-      fontSize: 11.5
+      fontSize: 12
     }
   }, "· ", fmtDate(t.date)), /*#__PURE__*/React.createElement(TagBadges, {
     ids: t.tags,
@@ -2537,7 +2630,7 @@ function HesaplarView({
     className: "ecz-mono",
     style: {
       fontWeight: 600,
-      fontSize: 13.5,
+      fontSize: 14,
       color: t.type === "gelir" ? C.green : C.red
     }
   }, t.type === "gelir" ? "+" : "−", fmt(t.amount)), /*#__PURE__*/React.createElement("button", {
@@ -2676,7 +2769,7 @@ function GunlukSayim({
       color: C.red,
       borderRadius: 10,
       padding: "9px 14px",
-      fontSize: 12.5,
+      fontSize: 13,
       fontWeight: 600
     }
   }, /*#__PURE__*/React.createElement(Lock, {
@@ -2762,9 +2855,7 @@ function GunlukSayim({
     })
   })), /*#__PURE__*/React.createElement(Field, {
     label: "Kasa (₺)"
-  }, /*#__PURE__*/React.createElement("input", {
-    type: "number",
-    step: "0.01",
+  }, /*#__PURE__*/React.createElement(TutarInput, {
     style: inputStyle,
     placeholder: "0.00",
     value: form.kasa,
@@ -2788,9 +2879,7 @@ function GunlukSayim({
     value: a.id
   }, a.name)))), /*#__PURE__*/React.createElement(Field, {
     label: "Kağıt Para (₺) — sadece sayım"
-  }, /*#__PURE__*/React.createElement("input", {
-    type: "number",
-    step: "0.01",
+  }, /*#__PURE__*/React.createElement(TutarInput, {
     style: inputStyle,
     placeholder: "0.00",
     value: form.paper,
@@ -2800,9 +2889,7 @@ function GunlukSayim({
     })
   })), /*#__PURE__*/React.createElement(Field, {
     label: "Bozuk Para (₺) — sadece sayım"
-  }, /*#__PURE__*/React.createElement("input", {
-    type: "number",
-    step: "0.01",
+  }, /*#__PURE__*/React.createElement(TutarInput, {
     style: inputStyle,
     placeholder: "0.00",
     value: form.coin,
@@ -2812,9 +2899,7 @@ function GunlukSayim({
     })
   })), /*#__PURE__*/React.createElement(Field, {
     label: "POS Tutarı (₺)"
-  }, /*#__PURE__*/React.createElement("input", {
-    type: "number",
-    step: "0.01",
+  }, /*#__PURE__*/React.createElement(TutarInput, {
     style: inputStyle,
     placeholder: "0.00",
     value: form.pos,
@@ -2824,9 +2909,7 @@ function GunlukSayim({
     })
   })), /*#__PURE__*/React.createElement(Field, {
     label: "Havale/EFT (₺)"
-  }, /*#__PURE__*/React.createElement("input", {
-    type: "number",
-    step: "0.01",
+  }, /*#__PURE__*/React.createElement(TutarInput, {
     style: inputStyle,
     placeholder: "0.00",
     value: form.eft,
@@ -2897,7 +2980,7 @@ function GunlukSayim({
     style: {
       width: "100%",
       borderCollapse: "collapse",
-      fontSize: 13.5
+      fontSize: 14
     }
   }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", {
     style: {
@@ -2908,7 +2991,7 @@ function GunlukSayim({
     key: h,
     style: {
       padding: "10px 16px",
-      fontSize: 11.5,
+      fontSize: 12,
       textTransform: "uppercase",
       letterSpacing: "0.04em",
       color: C.muted,
@@ -3041,7 +3124,7 @@ function KasaBankalarView({
   }, "Kasa / Bankalar"), /*#__PURE__*/React.createElement("p", {
     style: {
       color: C.muted,
-      fontSize: 13.5,
+      fontSize: 14,
       marginTop: 4
     }
   }, girisOnly ? "Günlük kasa sayımını gir." : "Hesaplarını yönet ve günlük kasa sayımını gir.")), !girisOnly && /*#__PURE__*/React.createElement("div", {
@@ -3192,7 +3275,7 @@ function GenelGiderler({
   }, /*#__PURE__*/React.createElement("div", {
     className: "ecz-mono",
     style: {
-      fontSize: 13.5,
+      fontSize: 14,
       color: C.muted
     }
   }, "Toplam genel gider: ", /*#__PURE__*/React.createElement("b", {
@@ -3274,9 +3357,7 @@ function GenelGiderler({
     })
   })), /*#__PURE__*/React.createElement(Field, {
     label: "Tutar (₺)"
-  }, /*#__PURE__*/React.createElement("input", {
-    type: "number",
-    step: "0.01",
+  }, /*#__PURE__*/React.createElement(TutarInput, {
     style: inputStyle,
     placeholder: "0.00",
     value: form.amount,
@@ -3355,7 +3436,7 @@ function GenelGiderler({
     style: {
       width: "100%",
       borderCollapse: "collapse",
-      fontSize: 13.5
+      fontSize: 14
     }
   }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", {
     style: {
@@ -3366,7 +3447,7 @@ function GenelGiderler({
     key: h,
     style: {
       padding: "10px 16px",
-      fontSize: 11.5,
+      fontSize: 12,
       textTransform: "uppercase",
       letterSpacing: "0.04em",
       color: C.muted,
@@ -3537,7 +3618,7 @@ function CalisanMaaslari({
     }
   }, /*#__PURE__*/React.createElement("h4", {
     style: {
-      fontSize: 12.5,
+      fontSize: 13,
       fontWeight: 700,
       color: C.muted,
       margin: "0 0 8px",
@@ -3552,7 +3633,7 @@ function CalisanMaaslari({
       alignItems: "center",
       padding: "7px 0",
       borderBottom: `1px solid ${C.paperDark}`,
-      fontSize: 12.5
+      fontSize: 13
     }
   }, /*#__PURE__*/React.createElement("span", null, row.month), /*#__PURE__*/React.createElement("span", {
     className: "ecz-mono",
@@ -3720,9 +3801,7 @@ function CalisanMaaslari({
     })
   })), /*#__PURE__*/React.createElement(Field, {
     label: "Aylık Net Maaş (₺)"
-  }, /*#__PURE__*/React.createElement("input", {
-    type: "number",
-    step: "0.01",
+  }, /*#__PURE__*/React.createElement(TutarInput, {
     style: inputStyle,
     value: empForm.salary,
     onChange: e => setEmpForm({
@@ -3850,7 +3929,7 @@ function CalisanMaaslari({
       size: 13
     })))), emp.position && /*#__PURE__*/React.createElement("div", {
       style: {
-        fontSize: 11.5,
+        fontSize: 12,
         color: isActive ? "#ffffff99" : C.muted,
         marginTop: 3
       }
@@ -3872,7 +3951,7 @@ function CalisanMaaslari({
       style: {
         display: "inline-block",
         marginTop: 6,
-        fontSize: 10.5,
+        fontSize: 11,
         fontWeight: 700,
         padding: "3px 8px",
         borderRadius: 20,
@@ -3906,7 +3985,7 @@ function CalisanMaaslari({
       padding: "10px 14px",
       background: C.paper,
       borderRadius: 10,
-      fontSize: 12.5,
+      fontSize: 13,
       marginBottom: 14
     }
   }, /*#__PURE__*/React.createElement("span", null, payForm.month, " maaşı: ", /*#__PURE__*/React.createElement("b", {
@@ -3951,9 +4030,7 @@ function CalisanMaaslari({
       ...payForm,
       date: e.target.value
     })
-  }), /*#__PURE__*/React.createElement("input", {
-    type: "number",
-    step: "0.01",
+  }), /*#__PURE__*/React.createElement(TutarInput, {
     style: inputStyle,
     placeholder: "Tutar",
     value: payForm.amount,
@@ -4035,17 +4112,17 @@ function CalisanMaaslari({
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 13.5
+      fontSize: 14
     }
   }, p.month, " ", /*#__PURE__*/React.createElement("span", {
     style: {
       color: C.muted,
-      fontSize: 11.5
+      fontSize: 12
     }
   }, "· ödeme: ", fmtDate(p.date)), /*#__PURE__*/React.createElement("span", {
     style: {
       marginLeft: 6,
-      fontSize: 10.5,
+      fontSize: 11,
       fontWeight: 600,
       padding: "2px 8px",
       borderRadius: 20,
@@ -4071,7 +4148,7 @@ function CalisanMaaslari({
     className: "ecz-mono",
     style: {
       fontWeight: 600,
-      fontSize: 13.5,
+      fontSize: 14,
       color: C.red
     }
   }, "−", fmt(p.amount)), /*#__PURE__*/React.createElement("button", {
@@ -4131,7 +4208,7 @@ function GiderlerView({
   }, "Giderler"), /*#__PURE__*/React.createElement("p", {
     style: {
       color: C.muted,
-      fontSize: 13.5,
+      fontSize: 14,
       marginTop: 4
     }
   }, "Toplam gider: ", /*#__PURE__*/React.createElement("b", {
@@ -4317,7 +4394,7 @@ function SuppliersView({
   }, "Tedarikçiler"), /*#__PURE__*/React.createElement("p", {
     style: {
       color: C.muted,
-      fontSize: 13.5,
+      fontSize: 14,
       marginTop: 4
     }
   }, "Cari hesapları ve bakiyeleri takip et.")), /*#__PURE__*/React.createElement("button", {
@@ -4494,7 +4571,7 @@ function SuppliersView({
       }
     }, bal > 0 ? "Borçlu: " : bal < 0 ? "Alacaklı: " : "Bakiye: ", fmt(Math.abs(bal))), s.phone && /*#__PURE__*/React.createElement("div", {
       style: {
-        fontSize: 11.5,
+        fontSize: 12,
         color: isActive ? "#ffffff99" : C.muted,
         marginTop: 4
       }
@@ -4558,9 +4635,7 @@ function SuppliersView({
       ...txForm,
       description: e.target.value
     })
-  }), /*#__PURE__*/React.createElement("input", {
-    type: "number",
-    step: "0.01",
+  }), /*#__PURE__*/React.createElement(TutarInput, {
     style: inputStyle,
     placeholder: "Tutar",
     value: txForm.amount,
@@ -4616,12 +4691,12 @@ function SuppliersView({
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 13.5
+      fontSize: 14
     }
   }, t.description || t.type, " ", /*#__PURE__*/React.createElement("span", {
     style: {
       color: C.muted,
-      fontSize: 11.5
+      fontSize: 12
     }
   }, "· ", fmtDate(t.date), t.type === "ödeme" && (t.accountId ? ` · ${(accounts.find(a => a.id === t.accountId) || {}).name || "Hesap"}` : " · Elden")), /*#__PURE__*/React.createElement(TagBadges, {
     ids: t.tags,
@@ -4636,7 +4711,7 @@ function SuppliersView({
     className: "ecz-mono",
     style: {
       fontWeight: 600,
-      fontSize: 13.5,
+      fontSize: 14,
       color: t.type === "borç" ? C.red : C.green
     }
   }, t.type === "borç" ? "+" : "−", fmt(t.amount)), /*#__PURE__*/React.createElement("button", {
@@ -4811,7 +4886,7 @@ function PrescriptionsView({
   }, "SGK / Fatura Takibi"), /*#__PURE__*/React.createElement("p", {
     style: {
       color: C.muted,
-      fontSize: 13.5,
+      fontSize: 14,
       marginTop: 4
     }
   }, "SGK ve AHSB'ye kesilen faturaları ve ödeme durumlarını yönet.")), /*#__PURE__*/React.createElement("button", {
@@ -4876,7 +4951,7 @@ function PrescriptionsView({
       border: `1px solid ${C.line}`,
       borderRadius: 20,
       padding: "6px 14px",
-      fontSize: 12.5,
+      fontSize: 13,
       fontWeight: 600,
       cursor: "pointer",
       background: filterInst === k ? C.accent : C.card,
@@ -4948,9 +5023,7 @@ function PrescriptionsView({
     })
   })), /*#__PURE__*/React.createElement(Field, {
     label: "Tutar (₺)"
-  }, /*#__PURE__*/React.createElement("input", {
-    type: "number",
-    step: "0.01",
+  }, /*#__PURE__*/React.createElement(TutarInput, {
     style: inputStyle,
     value: form.amount,
     onChange: e => setForm({
@@ -5021,7 +5094,7 @@ function PrescriptionsView({
     style: {
       width: "100%",
       borderCollapse: "collapse",
-      fontSize: 13.5
+      fontSize: 14
     }
   }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", {
     style: {
@@ -5032,7 +5105,7 @@ function PrescriptionsView({
     key: h,
     style: {
       padding: "10px 16px",
-      fontSize: 11.5,
+      fontSize: 12,
       textTransform: "uppercase",
       letterSpacing: "0.04em",
       color: C.muted,
@@ -5057,7 +5130,7 @@ function PrescriptionsView({
   }, p.dueDate ? fmtDate(p.dueDate) : "—", p.status !== "ödendi" && p.dueDate && p.dueDate < todayStr() && /*#__PURE__*/React.createElement("span", {
     style: {
       display: "block",
-      fontSize: 10.5,
+      fontSize: 11,
       fontWeight: 700
     }
   }, "Gecikti")), /*#__PURE__*/React.createElement("td", {
@@ -5102,7 +5175,7 @@ function PrescriptionsView({
       cursor: "pointer",
       borderRadius: 20,
       padding: "4px 10px",
-      fontSize: 11.5,
+      fontSize: 12,
       fontWeight: 600,
       background: p.status === "ödendi" ? C.greenSoft : C.redSoft,
       color: p.status === "ödendi" ? C.green : C.red
@@ -5194,7 +5267,7 @@ function MonthlyTasksView({
   }, "Aylık İş Takibi"), /*#__PURE__*/React.createElement("p", {
     style: {
       color: C.muted,
-      fontSize: 13.5,
+      fontSize: 14,
       marginTop: 4
     }
   }, "Her ay tekrar eden işleri tanımla, durumunu takip et.")), /*#__PURE__*/React.createElement("input", {
@@ -5284,7 +5357,7 @@ function MonthlyTasksView({
       }
     }, /*#__PURE__*/React.createElement("span", {
       style: {
-        fontSize: 13.5,
+        fontSize: 14,
         fontWeight: 600
       }
     }, t.name), /*#__PURE__*/React.createElement("div", {
@@ -5301,7 +5374,7 @@ function MonthlyTasksView({
         cursor: "pointer",
         borderRadius: 20,
         padding: "5px 12px",
-        fontSize: 11.5,
+        fontSize: 12,
         fontWeight: 600,
         background: st === opt.key ? (opt.color === "red" ? C.red : opt.color === "amber" ? C.amber : C.green) : opt.color === "red" ? C.redSoft : opt.color === "amber" ? C.amberSoft : C.greenSoft,
         color: st === opt.key ? "#fff" : opt.color === "red" ? C.red : opt.color === "amber" ? C.amber : C.green
@@ -5385,7 +5458,7 @@ function EtiketlerView({
   }, "Etiketler"), /*#__PURE__*/React.createElement("p", {
     style: {
       color: C.muted,
-      fontSize: 13.5,
+      fontSize: 14,
       marginTop: 4
     }
   }, "Kasa, gider, tedarikçi ve fatura hareketlerini serbestçe etiketleyip gruplayabilirsin.")), /*#__PURE__*/React.createElement("form", {
@@ -5515,7 +5588,7 @@ function EtiketlerView({
       }
     }, s.net >= 0 ? "+" : "−", fmt(Math.abs(s.net))), /*#__PURE__*/React.createElement("div", {
       style: {
-        fontSize: 11.5,
+        fontSize: 12,
         color: C.muted,
         marginTop: 4
       }
@@ -5655,9 +5728,7 @@ function CardChargeForm({
     })
   })), /*#__PURE__*/React.createElement(Field, {
     label: "Tutar (₺)"
-  }, /*#__PURE__*/React.createElement("input", {
-    type: "number",
-    step: "0.01",
+  }, /*#__PURE__*/React.createElement(TutarInput, {
     style: inputStyle,
     value: form.amount,
     onChange: e => setForm({
@@ -5800,7 +5871,7 @@ function KrediKartlariView({
   }, "Kredi Kartı Çekimleri"), /*#__PURE__*/React.createElement("p", {
     style: {
       color: C.muted,
-      fontSize: 13.5,
+      fontSize: 14,
       marginTop: 4
     }
   }, "Hangi karttan kime, taksit mi vadeli mi çekim yaptığını ve ödeme tarihlerini takip et.")), /*#__PURE__*/React.createElement("div", {
@@ -5858,7 +5929,7 @@ function KrediKartlariView({
     style: {
       width: "100%",
       borderCollapse: "collapse",
-      fontSize: 13.5
+      fontSize: 14
     }
   }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", {
     style: {
@@ -5869,7 +5940,7 @@ function KrediKartlariView({
     key: h,
     style: {
       padding: "10px 16px",
-      fontSize: 11.5,
+      fontSize: 12,
       textTransform: "uppercase",
       letterSpacing: "0.04em",
       color: C.muted,
@@ -5919,7 +5990,7 @@ function KrediKartlariView({
         cursor: "pointer",
         borderRadius: 20,
         padding: "4px 10px",
-        fontSize: 11.5,
+        fontSize: 12,
         fontWeight: 600,
         background: r.paid ? C.greenSoft : isOverdue ? C.redSoft : C.amberSoft,
         color: r.paid ? C.green : isOverdue ? C.red : C.amber
@@ -6097,7 +6168,7 @@ function KrediKartlariView({
     }
   }, card.name), card.bankName && /*#__PURE__*/React.createElement("span", {
     style: {
-      fontSize: 11.5,
+      fontSize: 12,
       color: C.muted
     }
   }, "· ", card.bankName), /*#__PURE__*/React.createElement("button", {
@@ -6150,12 +6221,12 @@ function KrediKartlariView({
       }
     }, /*#__PURE__*/React.createElement("div", {
       style: {
-        fontSize: 13.5
+        fontSize: 14
       }
     }, /*#__PURE__*/React.createElement("b", null, c.supplierName), " — ", card?.name || "—", " ", /*#__PURE__*/React.createElement("span", {
       style: {
         color: C.muted,
-        fontSize: 11.5
+        fontSize: 12
       }
     }, "· ", fmtDate(c.date), " · ", c.type === "taksit" ? `${c.installments} Taksit` : c.type === "vadeli" ? "Vadeli" : "Tek Çekim")), /*#__PURE__*/React.createElement("div", {
       style: {
@@ -6167,7 +6238,7 @@ function KrediKartlariView({
       className: "ecz-mono",
       style: {
         fontWeight: 600,
-        fontSize: 13.5
+        fontSize: 14
       }
     }, fmt(c.amount)), /*#__PURE__*/React.createElement("button", {
       onClick: () => startEditCharge(c),
@@ -6295,7 +6366,7 @@ function KesintilerView({
   }, "Kesintiler"), /*#__PURE__*/React.createElement("p", {
     style: {
       color: C.muted,
-      fontSize: 13.5,
+      fontSize: 14,
       marginTop: 4
     }
   }, "SGK/fatura kaynaklı kesintileri ve nedenlerini takip et.")), /*#__PURE__*/React.createElement("button", {
@@ -6384,9 +6455,7 @@ function KesintilerView({
     })
   })), /*#__PURE__*/React.createElement(Field, {
     label: "Kesinti Tutarı (₺)"
-  }, /*#__PURE__*/React.createElement("input", {
-    type: "number",
-    step: "0.01",
+  }, /*#__PURE__*/React.createElement(TutarInput, {
     style: inputStyle,
     value: form.amount,
     onChange: e => setForm({
@@ -6511,7 +6580,7 @@ function KesintilerView({
     style: {
       width: "100%",
       borderCollapse: "collapse",
-      fontSize: 13.5
+      fontSize: 14
     }
   }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", {
     style: {
@@ -6522,7 +6591,7 @@ function KesintilerView({
     key: h,
     style: {
       padding: "10px 16px",
-      fontSize: 11.5,
+      fontSize: 12,
       textTransform: "uppercase",
       letterSpacing: "0.04em",
       color: C.muted,
@@ -6543,7 +6612,7 @@ function KesintilerView({
       padding: "10px 16px",
       fontWeight: 500
     }
-  }, d.reason || "—", /*#__PURE__*/(function(){ var lp = (prescriptions || []).find(function(p){ return p.id === d.prescriptionId; }); return lp ? React.createElement("div", { style: { fontSize: 11.5, color: C.muted, marginTop: 2 } }, "Fatura: " + (lp.description || lp.institution || "")) : null; })(), React.createElement(TagBadges, {
+  }, d.reason || "—", /*#__PURE__*/(function(){ var lp = (prescriptions || []).find(function(p){ return p.id === d.prescriptionId; }); return lp ? React.createElement("div", { style: { fontSize: 12, color: C.muted, marginTop: 2 } }, "Fatura: " + (lp.description || lp.institution || "")) : null; })(), React.createElement(TagBadges, {
     ids: d.tags,
     tags: tags
   })), /*#__PURE__*/React.createElement("td", {
@@ -6718,7 +6787,7 @@ function IadelerView({
   }, "İadeler"), /*#__PURE__*/React.createElement("p", {
     style: {
       color: C.muted,
-      fontSize: 13.5,
+      fontSize: 14,
       marginTop: 4
     }
   }, "Tedarikçilere yapılan ürün iadelerini takip et.")), /*#__PURE__*/React.createElement("button", {
@@ -6830,9 +6899,7 @@ function IadelerView({
     value: s.name
   })))), /*#__PURE__*/React.createElement(Field, {
     label: "Tutar (₺) — isteğe bağlı"
-  }, /*#__PURE__*/React.createElement("input", {
-    type: "number",
-    step: "0.01",
+  }, /*#__PURE__*/React.createElement(TutarInput, {
     style: inputStyle,
     placeholder: "0.00",
     value: form.amount,
@@ -6886,7 +6953,7 @@ function IadelerView({
     style: {
       width: "100%",
       borderCollapse: "collapse",
-      fontSize: 13.5
+      fontSize: 14
     }
   }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", {
     style: {
@@ -6897,7 +6964,7 @@ function IadelerView({
     key: h,
     style: {
       padding: "10px 16px",
-      fontSize: 11.5,
+      fontSize: 12,
       textTransform: "uppercase",
       letterSpacing: "0.04em",
       color: C.muted,
@@ -6947,7 +7014,7 @@ function IadelerView({
       cursor: "pointer",
       borderRadius: 20,
       padding: "4px 10px",
-      fontSize: 11.5,
+      fontSize: 12,
       fontWeight: 600,
       background: (r.status || "bekliyor") === "onaylandı" ? C.greenSoft : C.amberSoft,
       color: (r.status || "bekliyor") === "onaylandı" ? C.green : C.amber
@@ -7177,7 +7244,7 @@ function AuthShell({
     }
   }, "pharma", /*#__PURE__*/React.createElement("span", {
     style: {
-      color: C.green
+      color: C.accent
     }
   }, "fin"))), /*#__PURE__*/React.createElement("div", {
     className: "fadein",
@@ -7197,7 +7264,7 @@ function AuthShell({
     }
   }, title), subtitle && /*#__PURE__*/React.createElement("p", {
     style: {
-      fontSize: 12.5,
+      fontSize: 13,
       color: C.muted,
       margin: "0 0 20px",
       textAlign: "center",
@@ -7264,7 +7331,7 @@ function AuthSetupScreen({
     onChange: setPw2
   }), error && /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 12.5,
+      fontSize: 13,
       color: C.red,
       fontWeight: 600
     }
@@ -7278,7 +7345,7 @@ function AuthSetupScreen({
       border: "none",
       borderRadius: 8,
       padding: "11px 16px",
-      fontSize: 13.5,
+      fontSize: 14,
       fontWeight: 700,
       cursor: busy ? "default" : "pointer",
       opacity: busy ? 0.7 : 1
@@ -7338,7 +7405,7 @@ function AuthLoginScreen({
       border: `1px solid ${selectedId === u.id ? C.ink : C.line}`,
       background: selectedId === u.id ? C.ink : C.card,
       color: selectedId === u.id ? "#fff" : C.text,
-      fontSize: 12.5,
+      fontSize: 13,
       fontWeight: 600,
       cursor: "pointer"
     }
@@ -7356,7 +7423,7 @@ function AuthLoginScreen({
     autoFocus: true
   }), error && /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 12.5,
+      fontSize: 13,
       color: C.red,
       fontWeight: 600
     }
@@ -7370,7 +7437,7 @@ function AuthLoginScreen({
       border: "none",
       borderRadius: 8,
       padding: "11px 16px",
-      fontSize: 13.5,
+      fontSize: 14,
       fontWeight: 700,
       cursor: busy ? "default" : "pointer",
       opacity: busy ? 0.7 : 1
@@ -7529,7 +7596,7 @@ function KullaniciYonetimiModal({
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 11.5,
+      fontSize: 12,
       fontWeight: 700,
       color: C.muted,
       textTransform: "uppercase",
@@ -7582,7 +7649,7 @@ function KullaniciYonetimiModal({
       border: `1px solid ${selectedId === u.id && !adding ? C.ink : C.line}`,
       background: selectedId === u.id && !adding ? C.ink : C.paper,
       color: selectedId === u.id && !adding ? "#fff" : C.text,
-      fontSize: 12.5,
+      fontSize: 13,
       fontWeight: 600
     }
   }, /*#__PURE__*/React.createElement("span", {
@@ -7592,7 +7659,7 @@ function KullaniciYonetimiModal({
       borderRadius: "50%",
       background: selectedId === u.id && !adding ? "rgba(255,255,255,.25)" : C.ink,
       color: "#fff",
-      fontSize: 9,
+      fontSize: 10,
       fontWeight: 700,
       display: "flex",
       alignItems: "center",
@@ -7611,7 +7678,7 @@ function KullaniciYonetimiModal({
       border: `1px dashed ${C.muted}`,
       background: "transparent",
       color: C.muted,
-      fontSize: 12.5,
+      fontSize: 13,
       fontWeight: 600,
       cursor: "pointer"
     }
@@ -7686,7 +7753,7 @@ function KullaniciYonetimiModal({
     }
   }, "Vazgeç")), /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 11.5,
+      fontSize: 12,
       color: C.muted
     }
   }, "Yeni kullanıcı varsayılan olarak tüm bölümlerde Gizli olarak başlar — aşağıdan izinlerini ayarla.")) : selectedUser && /*#__PURE__*/React.createElement("div", null, selectedUser.isAdmin ? /*#__PURE__*/React.createElement("div", {
@@ -7695,7 +7762,7 @@ function KullaniciYonetimiModal({
       color: C.inkSoft,
       borderRadius: 10,
       padding: "10px 14px",
-      fontSize: 12.5,
+      fontSize: 13,
       marginBottom: 16,
       lineHeight: 1.5
     }
@@ -7705,7 +7772,7 @@ function KullaniciYonetimiModal({
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 11.5,
+      fontSize: 12,
       fontWeight: 700,
       color: C.muted,
       textTransform: "uppercase",
@@ -7767,7 +7834,7 @@ function KullaniciYonetimiModal({
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 11.5,
+      fontSize: 12,
       fontWeight: 700,
       color: C.muted,
       textTransform: "uppercase",
@@ -7829,7 +7896,7 @@ function KullaniciYonetimiModal({
       background: "transparent",
       border: "none",
       color: C.red,
-      fontSize: 12.5,
+      fontSize: 13,
       fontWeight: 700,
       cursor: "pointer"
     }
@@ -8015,7 +8082,7 @@ function IzinlerView({
   }, "İzinler"), /*#__PURE__*/React.createElement("p", {
     style: {
       color: C.muted,
-      fontSize: 13.5,
+      fontSize: 14,
       marginTop: 4
     }
   }, "Personel izin tarihlerini ve türlerini takip et.")), /*#__PURE__*/React.createElement("button", {
@@ -8173,7 +8240,7 @@ function IzinlerView({
     })
   }))), /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 12.5,
+      fontSize: 13,
       color: C.muted
     }
   }, "Toplam ", /*#__PURE__*/React.createElement("b", {
@@ -8248,7 +8315,7 @@ function IzinlerView({
       }
     }, empName(empId)), /*#__PURE__*/React.createElement("div", {
       style: {
-        fontSize: 11.5,
+        fontSize: 12,
         color: C.muted,
         marginTop: 2
       }
@@ -8264,7 +8331,7 @@ function IzinlerView({
       style: {
         display: "inline-block",
         marginTop: 4,
-        fontSize: 10.5,
+        fontSize: 11,
         fontWeight: 700,
         color: C.amber,
         background: C.amberSoft,
@@ -8273,7 +8340,7 @@ function IzinlerView({
       }
     }, "🤰 Doğum İzninde"), hak ? /*#__PURE__*/React.createElement("div", {
       style: {
-        fontSize: 11.5,
+        fontSize: 12,
         color: C.muted,
         marginTop: 2
       }
@@ -8313,7 +8380,7 @@ function IzinlerView({
     style: {
       width: "100%",
       borderCollapse: "collapse",
-      fontSize: 13.5
+      fontSize: 14
     }
   }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", {
     style: {
@@ -8324,7 +8391,7 @@ function IzinlerView({
     key: h,
     style: {
       padding: "10px 16px",
-      fontSize: 11.5,
+      fontSize: 12,
       textTransform: "uppercase",
       letterSpacing: "0.04em",
       color: C.muted,
@@ -9587,7 +9654,7 @@ function App() {
         justifyContent: "center",
         background: C.paper,
         color: C.muted,
-        fontSize: 13.5
+        fontSize: 14
       }
     }, /*#__PURE__*/React.createElement(GlobalStyle, null), "Panel yükleniyor…");
   }
@@ -9601,7 +9668,7 @@ function App() {
         justifyContent: "center",
         background: C.paper,
         color: C.muted,
-        fontSize: 13.5
+        fontSize: 14
       }
     }, /*#__PURE__*/React.createElement(GlobalStyle, null), "Yükleniyor…");
   }
@@ -9655,28 +9722,29 @@ function App() {
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      width: 32,
-      height: 32,
+      width: 34,
+      height: 34,
       borderRadius: 10,
       background: C.accent,
       display: "flex",
       alignItems: "center",
-      justifyContent: "center"
+      justifyContent: "center",
+      flexShrink: 0
     }
   }, /*#__PURE__*/React.createElement(Pill, {
-    size: 16,
+    size: 17,
     color: "#fff",
     strokeWidth: 2.6
   })), /*#__PURE__*/React.createElement("span", {
     className: "ecz-display",
     style: {
-      fontSize: 16,
+      fontSize: 19,
       fontWeight: 600,
       color: C.ink
     }
   }, "pharma", /*#__PURE__*/React.createElement("span", {
     style: {
-      color: C.green
+      color: C.accent
     }
   }, "fin"))), /*#__PURE__*/React.createElement("div", {
     style: {
@@ -9960,7 +10028,7 @@ function App() {
       padding: "24px 16px",
       textAlign: "center",
       color: C.muted,
-      fontSize: 12.5
+      fontSize: 13
     }
   }, "Yeni bildirim yok 🎉") : visibleNotifications.map(n => /*#__PURE__*/React.createElement("div", {
     key: n.id,
@@ -9987,7 +10055,7 @@ function App() {
     }
   }), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 12.5,
+      fontSize: 13,
       color: C.text,
       lineHeight: 1.4
     }
@@ -9999,7 +10067,7 @@ function App() {
     }
   }, navItems.find(x => x.key === n.tab)?.label)))))), /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 12.5,
+      fontSize: 13,
       color: C.muted,
       background: C.paperDark,
       borderRadius: 20,
@@ -10043,7 +10111,7 @@ function App() {
         border: "none",
         cursor: "pointer",
         textAlign: "left",
-        fontSize: 12.5,
+        fontSize: 13,
         fontWeight: 500,
         whiteSpace: "nowrap",
         flexShrink: 0,

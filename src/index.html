@@ -868,6 +868,34 @@ function ymd(d) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 const todayStr = () => ymd(new Date());
+/* Bir gider/gelir kaydının hesap bakiyesini fiilen etkileyip etkilemediği:
+   status alanı yoksa (eski kayıtlar) veya "ödendi" ise gerçekleşmiş sayılır;
+   "bekliyor" ise henüz gerçekleşmemiştir ve bakiye hesaplarına dahil edilmez. */
+const isRealized = t => t.status !== "bekliyor";
+/* "YYYY-MM-DD" bir tarihe N ay ekler, ay taşmalarında günü o ayın son gününe
+   sabitler (örn. 31 Ocak + 1 ay -> 28/29 Şubat). Tekrarlama şablonlarının
+   "aylık" sıklığı için kullanılır. */
+function addMonthsClamped(dateStr, months) {
+  const d = parseLocalDate(dateStr);
+  const totalMonth = d.getMonth() + Number(months);
+  const targetYear = d.getFullYear() + Math.floor(totalMonth / 12);
+  const targetMonth = ((totalMonth % 12) + 12) % 12;
+  const lastDay = new Date(targetYear, targetMonth + 1, 0).getDate();
+  const day = Math.min(d.getDate(), lastDay);
+  return ymd(new Date(targetYear, targetMonth, day));
+}
+function addDaysStr(dateStr, days) {
+  const d = parseLocalDate(dateStr);
+  d.setDate(d.getDate() + Number(days));
+  return ymd(d);
+}
+/* Bir tekrarlama şablonunun bir sonraki vade tarihini hesaplar. */
+function nextRecurringDate(dateStr, frequency) {
+  if (frequency && frequency.type === "custom") {
+    return addDaysStr(dateStr, Math.max(1, Number(frequency.intervalDays) || 30));
+  }
+  return addMonthsClamped(dateStr, 1);
+}
 async function loadKey(key, fallback) {
   try {
     const raw = localStorage.getItem(key);
@@ -916,7 +944,8 @@ const SYNC_KEY_MAP = {
   taskTemplates: "ecz-task-templates",
   taskStatuses: "ecz-task-statuses",
   authUsers: "ecz-auth-users",
-  authSettings: "ecz-auth-settings"
+  authSettings: "ecz-auth-settings",
+  recurringTemplates: "ecz-recurring-templates"
 };
 const SYNC_STORAGE_KEYS = new Set(Object.values(SYNC_KEY_MAP));
 const IS_TAURI = typeof window !== "undefined" && !!window.__TAURI__;
@@ -1595,8 +1624,8 @@ function Dashboard({
   const todayD = todayStr();
   const activeLeaves = leaves.filter(l => l.startDate <= todayD && l.endDate >= todayD);
   const upcomingLeaves = [...leaves].filter(l => l.startDate > todayD).sort((a, b) => new Date(a.startDate) - new Date(b.startDate)).slice(0, 5);
-  const income = transactions.filter(t => t.type === "gelir" && !t.isTransfer).reduce((s, t) => s + Number(t.amount), 0);
-  const expense = transactions.filter(t => t.type === "gider" && !t.isTransfer).reduce((s, t) => s + Number(t.amount), 0);
+  const income = transactions.filter(t => t.type === "gelir" && !t.isTransfer && isRealized(t)).reduce((s, t) => s + Number(t.amount), 0);
+  const expense = transactions.filter(t => t.type === "gider" && !t.isTransfer && isRealized(t)).reduce((s, t) => s + Number(t.amount), 0);
   const kasa = income - expense;
   const supplierBalance = useMemo(() => {
     const map = {};
@@ -1622,7 +1651,7 @@ function Dashboard({
       });
     }
     transactions.forEach(t => {
-      if (t.isTransfer) return;
+      if (t.isTransfer || !isRealized(t)) return;
       const d = new Date(t.date);
       const key = `${d.getFullYear()}-${d.getMonth()}`;
       const m = months.find(mm => mm.key === key);
@@ -1631,7 +1660,7 @@ function Dashboard({
     return months;
   }, [transactions]);
   const recent = useMemo(() => {
-    return [...transactions].sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 6);
+    return [...transactions].filter(isRealized).sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 6);
   }, [transactions]);
   const cardPending = useMemo(() => {
     const rows = [];
@@ -2131,7 +2160,7 @@ function HesaplarView({
     setOpenTxForm(true);
   };
   const balanceOf = acc => {
-    const net = transactions.filter(t => t.accountId === acc.id).reduce((s, t) => s + (t.type === "gelir" ? Number(t.amount) : -Number(t.amount)), 0);
+    const net = transactions.filter(t => t.accountId === acc.id && isRealized(t)).reduce((s, t) => s + (t.type === "gelir" ? Number(t.amount) : -Number(t.amount)), 0);
     return Number(acc.openingBalance || 0) + net;
   };
   const totalBalance = accounts.reduce((s, a) => s + balanceOf(a), 0);
@@ -2185,7 +2214,7 @@ function HesaplarView({
     const asc = [...txs].sort((a, b) => new Date(a.date) - new Date(b.date) || String(a.id).localeCompare(String(b.id)));
     let running = Number(activeAccObj.openingBalance || 0);
     const withBal = asc.map(t => {
-      running += t.type === "gelir" ? Number(t.amount) : -Number(t.amount);
+      if (isRealized(t)) running += t.type === "gelir" ? Number(t.amount) : -Number(t.amount);
       return { ...t, _runningBalance: running };
     });
     return withBal.slice().reverse();
@@ -2445,7 +2474,12 @@ function HesaplarView({
               ),
               /*#__PURE__*/React.createElement("tbody", null,
                 accountTxRows.map(t => /*#__PURE__*/React.createElement("tr", { key: t.id, className: "kasa-tx-row" },
-                  /*#__PURE__*/React.createElement("td", { style: { padding: "11px 20px", borderBottom: `1px solid ${C.line}`, fontSize: 11.5, fontWeight: 600, color: C.muted, whiteSpace: "nowrap" } }, txTypeLabel(t)),
+                  /*#__PURE__*/React.createElement("td", { style: { padding: "11px 20px", borderBottom: `1px solid ${C.line}`, fontSize: 11.5, fontWeight: 600, color: C.muted, whiteSpace: "nowrap" } },
+                    txTypeLabel(t),
+                    !isRealized(t) && /*#__PURE__*/React.createElement("span", {
+                      style: { marginLeft: 6, fontSize: 10, fontWeight: 600, padding: "2px 6px", borderRadius: 20, background: C.amberSoft, color: C.amber }
+                    }, "Bekliyor")
+                  ),
                   /*#__PURE__*/React.createElement("td", { style: { padding: "11px 20px", borderBottom: `1px solid ${C.line}`, fontSize: 13, whiteSpace: "nowrap" } }, fmtDate(t.date)),
                   /*#__PURE__*/React.createElement("td", { style: { padding: "11px 20px", borderBottom: `1px solid ${C.line}`, fontSize: 13 } },
                     relatedLabel(t),
@@ -3160,7 +3194,10 @@ function GenelGiderler({
   removeTx,
   tags,
   addTag,
-  accounts
+  accounts,
+  recurringTemplates,
+  addRecurringTemplate,
+  removeRecurringTemplate
 }) {
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
@@ -3171,11 +3208,15 @@ function GenelGiderler({
     amount: "",
     tags: [],
     paymentMethod: "hesaptan",
-    accountId: accounts[0]?.id || ""
+    accountId: accounts[0]?.id || "",
+    recurring: false,
+    freqType: "monthly",
+    intervalDays: "30"
   });
   const giderler = transactions.filter(t => t.type === "gider" && t.giderTuru !== "maas" && t.giderTuru !== "tedarikci" && t.giderTuru !== "kredikarti" && t.giderTuru !== "kesinti" && t.giderTuru !== "transfer");
   const sorted = [...giderler].sort((a, b) => new Date(b.date) - new Date(a.date));
-  const total = giderler.reduce((s, t) => s + Number(t.amount), 0);
+  const total = giderler.filter(isRealized).reduce((s, t) => s + Number(t.amount), 0);
+  const myTemplates = (recurringTemplates || []).filter(rt => rt.kind === "gider");
   const startEdit = t => {
     setEditingId(t.id);
     setForm({
@@ -3185,7 +3226,10 @@ function GenelGiderler({
       amount: t.amount ?? "",
       tags: t.tags || [],
       paymentMethod: t.paymentMethod || "hesaptan",
-      accountId: t.accountId || accounts[0]?.id || ""
+      accountId: t.accountId || accounts[0]?.id || "",
+      recurring: false,
+      freqType: "monthly",
+      intervalDays: "30"
     });
     setOpen(true);
   };
@@ -3200,17 +3244,50 @@ function GenelGiderler({
     const payload = {
       type: "gider",
       giderTuru: "genel",
-      ...form,
+      date: form.date,
+      category: form.category,
+      description: form.description,
       amount: Number(form.amount),
+      tags: form.tags,
+      paymentMethod: form.paymentMethod,
       accountId: form.paymentMethod === "hesaptan" ? form.accountId : null,
       accountName: account ? account.bankName || account.name : null
     };
     if (editingId) {
       editTx(editingId, payload);
     } else {
+      let templateId = null;
+      if (form.recurring) {
+        templateId = uid();
+        addRecurringTemplate({
+          id: templateId,
+          kind: "gider",
+          category: form.category,
+          description: form.description,
+          amount: Number(form.amount),
+          paymentMethod: form.paymentMethod,
+          accountId: form.paymentMethod === "hesaptan" ? form.accountId : null,
+          tags: form.tags,
+          frequency: form.freqType === "custom" ? {
+            type: "custom",
+            intervalDays: Number(form.intervalDays) || 30
+          } : {
+            type: "monthly"
+          },
+          nextDueDate: nextRecurringDate(form.date, form.freqType === "custom" ? {
+            type: "custom",
+            intervalDays: Number(form.intervalDays) || 30
+          } : {
+            type: "monthly"
+          }),
+          active: true
+        });
+      }
       addTx({
         id: uid(),
-        ...payload
+        ...payload,
+        status: form.date > todayStr() ? "bekliyor" : "ödendi",
+        recurringTemplateId: templateId
       });
     }
     setForm({
@@ -3220,7 +3297,10 @@ function GenelGiderler({
       amount: "",
       tags: [],
       paymentMethod: form.paymentMethod,
-      accountId: form.accountId
+      accountId: form.accountId,
+      recurring: false,
+      freqType: "monthly",
+      intervalDays: "30"
     });
     setEditingId(null);
     setOpen(false);
@@ -3366,7 +3446,74 @@ function GenelGiderler({
   }, "Hesap seç…"), accounts.map(a => /*#__PURE__*/React.createElement("option", {
     key: a.id,
     value: a.id
-  }, a.name, a.bankName ? ` (${a.bankName})` : ""))))), /*#__PURE__*/React.createElement(Field, {
+  }, a.name, a.bankName ? ` (${a.bankName})` : ""))))), !editingId && form.date > todayStr() && /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 6,
+      fontSize: 12,
+      color: C.amber,
+      background: C.amberSoft,
+      borderRadius: 8,
+      padding: "8px 12px"
+    }
+  }, /*#__PURE__*/React.createElement(Clock, {
+    size: 14
+  }), " İleri tarihli: bu kayıt \"Bekliyor\" olarak eklenecek, vade günü gelene kadar hesap bakiyesini etkilemeyecek. Ödendiğinde listeden \"Ödendi\" olarak işaretle."), !editingId && /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      flexDirection: "column",
+      gap: 10,
+      background: C.paperDark,
+      borderRadius: 10,
+      padding: 12
+    }
+  }, /*#__PURE__*/React.createElement("label", {
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 8,
+      fontSize: 13,
+      fontWeight: 600,
+      cursor: "pointer"
+    }
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "checkbox",
+    checked: form.recurring,
+    onChange: e => setForm({
+      ...form,
+      recurring: e.target.checked
+    })
+  }), /*#__PURE__*/React.createElement(RotateCcw, {
+    size: 14
+  }), " Bu düzenli tekrar etsin"), form.recurring && /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "grid",
+      gridTemplateColumns: form.freqType === "custom" ? "160px 160px" : "160px",
+      gap: 10
+    }
+  }, /*#__PURE__*/React.createElement("select", {
+    style: inputStyle,
+    value: form.freqType,
+    onChange: e => setForm({
+      ...form,
+      freqType: e.target.value
+    })
+  }, /*#__PURE__*/React.createElement("option", {
+    value: "monthly"
+  }, "Aylık"), /*#__PURE__*/React.createElement("option", {
+    value: "custom"
+  }, "Serbest gün aralığı")), form.freqType === "custom" && /*#__PURE__*/React.createElement("input", {
+    type: "number",
+    min: "1",
+    style: inputStyle,
+    placeholder: "Kaç günde bir?",
+    value: form.intervalDays,
+    onChange: e => setForm({
+      ...form,
+      intervalDays: e.target.value
+    })
+  }))), /*#__PURE__*/React.createElement(Field, {
     label: "Etiketler"
   }, /*#__PURE__*/React.createElement(TagPicker, {
     tags: tags,
@@ -3388,7 +3535,62 @@ function GenelGiderler({
       fontWeight: 600,
       cursor: "pointer"
     }
-  }, editingId ? "Güncelle" : "Kaydet")), /*#__PURE__*/React.createElement("div", {
+  }, editingId ? "Güncelle" : "Kaydet")), myTemplates.length > 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: C.card,
+      borderRadius: 14,
+      padding: 14,
+      display: "flex",
+      flexDirection: "column",
+      gap: 8
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      fontWeight: 600,
+      color: C.muted,
+      textTransform: "uppercase",
+      letterSpacing: "0.04em"
+    }
+  }, "Tekrarlama Şablonları"), myTemplates.map(rt => /*#__PURE__*/React.createElement("div", {
+    key: rt.id,
+    style: {
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "space-between",
+      fontSize: 13,
+      gap: 10
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 8,
+      color: C.text
+    }
+  }, /*#__PURE__*/React.createElement(RotateCcw, {
+    size: 13,
+    color: C.muted
+  }), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontWeight: 500
+    }
+  }, rt.category), /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: C.muted
+    }
+  }, fmt(rt.amount), " · ", rt.frequency.type === "monthly" ? "Aylık" : `${rt.frequency.intervalDays} günde bir`, " · sıradaki: ", fmtDate(rt.nextDueDate))), /*#__PURE__*/React.createElement("button", {
+    onClick: () => removeRecurringTemplate(rt.id),
+    title: "Şablonu sil",
+    style: {
+      background: "none",
+      border: "none",
+      cursor: "pointer",
+      color: C.muted
+    }
+  }, /*#__PURE__*/React.createElement(Trash2, {
+    size: 14
+  }))))), /*#__PURE__*/React.createElement("div", {
     style: {
       background: C.card,
       borderRadius: 18,
@@ -3409,7 +3611,7 @@ function GenelGiderler({
       background: C.paperDark,
       textAlign: "left"
     }
-  }, ["Tarih", "Kategori", "Açıklama", "Tutar", ""].map(h => /*#__PURE__*/React.createElement("th", {
+  }, ["Tarih", "Kategori", "Açıklama", "Tutar", "Durum", ""].map(h => /*#__PURE__*/React.createElement("th", {
     key: h,
     style: {
       padding: "10px 16px",
@@ -3434,7 +3636,14 @@ function GenelGiderler({
       padding: "10px 16px",
       fontWeight: 500
     }
-  }, t.category), /*#__PURE__*/React.createElement("td", {
+  }, t.category, " ", t.recurringTemplateId && /*#__PURE__*/React.createElement(RotateCcw, {
+    size: 12,
+    color: C.muted,
+    style: {
+      marginLeft: 4,
+      verticalAlign: "middle"
+    }
+  })), /*#__PURE__*/React.createElement("td", {
     style: {
       padding: "10px 16px",
       color: C.muted
@@ -3460,6 +3669,32 @@ function GenelGiderler({
       color: C.red
     }
   }, "−", fmt(t.amount)), /*#__PURE__*/React.createElement("td", {
+    style: {
+      padding: "10px 16px"
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    onClick: () => editTx(t.id, {
+      status: isRealized(t) ? "bekliyor" : "ödendi"
+    }),
+    title: isRealized(t) ? "Bekliyor olarak işaretle" : "Ödendi olarak işaretle",
+    style: {
+      display: "inline-flex",
+      alignItems: "center",
+      gap: 4,
+      fontSize: 10,
+      fontWeight: 600,
+      padding: "3px 8px",
+      borderRadius: 20,
+      border: "none",
+      cursor: "pointer",
+      background: isRealized(t) ? C.greenSoft : C.amberSoft,
+      color: isRealized(t) ? C.green : C.amber
+    }
+  }, isRealized(t) ? /*#__PURE__*/React.createElement(CheckCircle2, {
+    size: 12
+  }) : /*#__PURE__*/React.createElement(Clock, {
+    size: 12
+  }), " ", isRealized(t) ? "Ödendi" : "Bekliyor")), /*#__PURE__*/React.createElement("td", {
     style: {
       padding: "10px 16px",
       textAlign: "right"
@@ -3501,7 +3736,10 @@ function GenelGelirler({
   removeTx,
   tags,
   addTag,
-  accounts
+  accounts,
+  recurringTemplates,
+  addRecurringTemplate,
+  removeRecurringTemplate
 }) {
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
@@ -3512,11 +3750,15 @@ function GenelGelirler({
     amount: "",
     tags: [],
     paymentMethod: "hesaba",
-    accountId: accounts[0]?.id || ""
+    accountId: accounts[0]?.id || "",
+    recurring: false,
+    freqType: "monthly",
+    intervalDays: "30"
   });
   const gelirler = transactions.filter(t => t.type === "gelir" && !t.isTransfer && t.gelirTuru !== "recete");
   const sorted = [...gelirler].sort((a, b) => new Date(b.date) - new Date(a.date));
-  const total = gelirler.reduce((s, t) => s + Number(t.amount), 0);
+  const total = gelirler.filter(isRealized).reduce((s, t) => s + Number(t.amount), 0);
+  const myTemplates = (recurringTemplates || []).filter(rt => rt.kind === "gelir");
   const startEdit = t => {
     setEditingId(t.id);
     setForm({
@@ -3526,7 +3768,10 @@ function GenelGelirler({
       amount: t.amount ?? "",
       tags: t.tags || [],
       paymentMethod: t.paymentMethod || "hesaba",
-      accountId: t.accountId || accounts[0]?.id || ""
+      accountId: t.accountId || accounts[0]?.id || "",
+      recurring: false,
+      freqType: "monthly",
+      intervalDays: "30"
     });
     setOpen(true);
   };
@@ -3541,17 +3786,50 @@ function GenelGelirler({
     const payload = {
       type: "gelir",
       gelirTuru: "genel",
-      ...form,
+      date: form.date,
+      category: form.category,
+      description: form.description,
       amount: Number(form.amount),
+      tags: form.tags,
+      paymentMethod: form.paymentMethod,
       accountId: form.paymentMethod === "hesaba" ? form.accountId : null,
       accountName: account ? account.bankName || account.name : null
     };
     if (editingId) {
       editTx(editingId, payload);
     } else {
+      let templateId = null;
+      if (form.recurring) {
+        templateId = uid();
+        addRecurringTemplate({
+          id: templateId,
+          kind: "gelir",
+          category: form.category,
+          description: form.description,
+          amount: Number(form.amount),
+          paymentMethod: form.paymentMethod,
+          accountId: form.paymentMethod === "hesaba" ? form.accountId : null,
+          tags: form.tags,
+          frequency: form.freqType === "custom" ? {
+            type: "custom",
+            intervalDays: Number(form.intervalDays) || 30
+          } : {
+            type: "monthly"
+          },
+          nextDueDate: nextRecurringDate(form.date, form.freqType === "custom" ? {
+            type: "custom",
+            intervalDays: Number(form.intervalDays) || 30
+          } : {
+            type: "monthly"
+          }),
+          active: true
+        });
+      }
       addTx({
         id: uid(),
-        ...payload
+        ...payload,
+        status: form.date > todayStr() ? "bekliyor" : "ödendi",
+        recurringTemplateId: templateId
       });
     }
     setForm({
@@ -3561,7 +3839,10 @@ function GenelGelirler({
       amount: "",
       tags: [],
       paymentMethod: form.paymentMethod,
-      accountId: form.accountId
+      accountId: form.accountId,
+      recurring: false,
+      freqType: "monthly",
+      intervalDays: "30"
     });
     setEditingId(null);
     setOpen(false);
@@ -3707,7 +3988,74 @@ function GenelGelirler({
   }, "Hesap seç…"), accounts.map(a => /*#__PURE__*/React.createElement("option", {
     key: a.id,
     value: a.id
-  }, a.name, a.bankName ? ` (${a.bankName})` : ""))))), /*#__PURE__*/React.createElement(Field, {
+  }, a.name, a.bankName ? ` (${a.bankName})` : ""))))), !editingId && form.date > todayStr() && /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 6,
+      fontSize: 12,
+      color: C.amber,
+      background: C.amberSoft,
+      borderRadius: 8,
+      padding: "8px 12px"
+    }
+  }, /*#__PURE__*/React.createElement(Clock, {
+    size: 14
+  }), " İleri tarihli: bu kayıt \"Bekliyor\" olarak eklenecek, vade günü gelene kadar hesap bakiyesine yansımayacak. Tahsil edildiğinde listeden \"Ödendi\" olarak işaretle."), !editingId && /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      flexDirection: "column",
+      gap: 10,
+      background: C.paperDark,
+      borderRadius: 10,
+      padding: 12
+    }
+  }, /*#__PURE__*/React.createElement("label", {
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 8,
+      fontSize: 13,
+      fontWeight: 600,
+      cursor: "pointer"
+    }
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "checkbox",
+    checked: form.recurring,
+    onChange: e => setForm({
+      ...form,
+      recurring: e.target.checked
+    })
+  }), /*#__PURE__*/React.createElement(RotateCcw, {
+    size: 14
+  }), " Bu düzenli tekrar etsin"), form.recurring && /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "grid",
+      gridTemplateColumns: form.freqType === "custom" ? "160px 160px" : "160px",
+      gap: 10
+    }
+  }, /*#__PURE__*/React.createElement("select", {
+    style: inputStyle,
+    value: form.freqType,
+    onChange: e => setForm({
+      ...form,
+      freqType: e.target.value
+    })
+  }, /*#__PURE__*/React.createElement("option", {
+    value: "monthly"
+  }, "Aylık"), /*#__PURE__*/React.createElement("option", {
+    value: "custom"
+  }, "Serbest gün aralığı")), form.freqType === "custom" && /*#__PURE__*/React.createElement("input", {
+    type: "number",
+    min: "1",
+    style: inputStyle,
+    placeholder: "Kaç günde bir?",
+    value: form.intervalDays,
+    onChange: e => setForm({
+      ...form,
+      intervalDays: e.target.value
+    })
+  }))), /*#__PURE__*/React.createElement(Field, {
     label: "Etiketler"
   }, /*#__PURE__*/React.createElement(TagPicker, {
     tags: tags,
@@ -3729,7 +4077,62 @@ function GenelGelirler({
       fontWeight: 600,
       cursor: "pointer"
     }
-  }, editingId ? "Güncelle" : "Kaydet")), /*#__PURE__*/React.createElement("div", {
+  }, editingId ? "Güncelle" : "Kaydet")), myTemplates.length > 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: C.card,
+      borderRadius: 14,
+      padding: 14,
+      display: "flex",
+      flexDirection: "column",
+      gap: 8
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      fontWeight: 600,
+      color: C.muted,
+      textTransform: "uppercase",
+      letterSpacing: "0.04em"
+    }
+  }, "Tekrarlama Şablonları"), myTemplates.map(rt => /*#__PURE__*/React.createElement("div", {
+    key: rt.id,
+    style: {
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "space-between",
+      fontSize: 13,
+      gap: 10
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 8,
+      color: C.text
+    }
+  }, /*#__PURE__*/React.createElement(RotateCcw, {
+    size: 13,
+    color: C.muted
+  }), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontWeight: 500
+    }
+  }, rt.category), /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: C.muted
+    }
+  }, fmt(rt.amount), " · ", rt.frequency.type === "monthly" ? "Aylık" : `${rt.frequency.intervalDays} günde bir`, " · sıradaki: ", fmtDate(rt.nextDueDate))), /*#__PURE__*/React.createElement("button", {
+    onClick: () => removeRecurringTemplate(rt.id),
+    title: "Şablonu sil",
+    style: {
+      background: "none",
+      border: "none",
+      cursor: "pointer",
+      color: C.muted
+    }
+  }, /*#__PURE__*/React.createElement(Trash2, {
+    size: 14
+  }))))), /*#__PURE__*/React.createElement("div", {
     style: {
       background: C.card,
       borderRadius: 18,
@@ -3750,7 +4153,7 @@ function GenelGelirler({
       background: C.paperDark,
       textAlign: "left"
     }
-  }, ["Tarih", "Kategori", "Açıklama", "Tutar", ""].map(h => /*#__PURE__*/React.createElement("th", {
+  }, ["Tarih", "Kategori", "Açıklama", "Tutar", "Durum", ""].map(h => /*#__PURE__*/React.createElement("th", {
     key: h,
     style: {
       padding: "10px 16px",
@@ -3775,7 +4178,14 @@ function GenelGelirler({
       padding: "10px 16px",
       fontWeight: 500
     }
-  }, t.category), /*#__PURE__*/React.createElement("td", {
+  }, t.category, " ", t.recurringTemplateId && /*#__PURE__*/React.createElement(RotateCcw, {
+    size: 12,
+    color: C.muted,
+    style: {
+      marginLeft: 4,
+      verticalAlign: "middle"
+    }
+  })), /*#__PURE__*/React.createElement("td", {
     style: {
       padding: "10px 16px",
       color: C.muted
@@ -3801,6 +4211,32 @@ function GenelGelirler({
       color: C.green
     }
   }, "+", fmt(t.amount)), /*#__PURE__*/React.createElement("td", {
+    style: {
+      padding: "10px 16px"
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    onClick: () => editTx(t.id, {
+      status: isRealized(t) ? "bekliyor" : "ödendi"
+    }),
+    title: isRealized(t) ? "Bekliyor olarak işaretle" : "Ödendi olarak işaretle",
+    style: {
+      display: "inline-flex",
+      alignItems: "center",
+      gap: 4,
+      fontSize: 10,
+      fontWeight: 600,
+      padding: "3px 8px",
+      borderRadius: 20,
+      border: "none",
+      cursor: "pointer",
+      background: isRealized(t) ? C.greenSoft : C.amberSoft,
+      color: isRealized(t) ? C.green : C.amber
+    }
+  }, isRealized(t) ? /*#__PURE__*/React.createElement(CheckCircle2, {
+    size: 12
+  }) : /*#__PURE__*/React.createElement(Clock, {
+    size: 12
+  }), " ", isRealized(t) ? "Ödendi" : "Bekliyor")), /*#__PURE__*/React.createElement("td", {
     style: {
       padding: "10px 16px",
       textAlign: "right"
@@ -4493,11 +4929,14 @@ function GiderlerView({
   editEmployee,
   tags,
   addTag,
-  accounts
+  accounts,
+  recurringTemplates,
+  addRecurringTemplate,
+  removeRecurringTemplate
 }) {
   const [subTab, setSubTab] = useState("genel");
-  const giderToplam = transactions.filter(t => t.type === "gider" && !t.isTransfer).reduce((s, t) => s + Number(t.amount), 0);
-  const gelirToplam = transactions.filter(t => t.type === "gelir" && !t.isTransfer).reduce((s, t) => s + Number(t.amount), 0);
+  const giderToplam = transactions.filter(t => t.type === "gider" && !t.isTransfer && isRealized(t)).reduce((s, t) => s + Number(t.amount), 0);
+  const gelirToplam = transactions.filter(t => t.type === "gelir" && !t.isTransfer && isRealized(t)).reduce((s, t) => s + Number(t.amount), 0);
   return /*#__PURE__*/React.createElement("div", {
     className: "fadein",
     style: {
@@ -4578,7 +5017,10 @@ function GiderlerView({
     removeTx: removeTx,
     tags: tags,
     addTag: addTag,
-    accounts: accounts
+    accounts: accounts,
+    recurringTemplates: recurringTemplates,
+    addRecurringTemplate: addRecurringTemplate,
+    removeRecurringTemplate: removeRecurringTemplate
   }) : subTab === "gelir" ? /*#__PURE__*/React.createElement(GenelGelirler, {
     transactions: transactions,
     addTx: addTx,
@@ -4586,7 +5028,10 @@ function GiderlerView({
     removeTx: removeTx,
     tags: tags,
     addTag: addTag,
-    accounts: accounts
+    accounts: accounts,
+    recurringTemplates: recurringTemplates,
+    addRecurringTemplate: addRecurringTemplate,
+    removeRecurringTemplate: removeRecurringTemplate
   }) : /*#__PURE__*/React.createElement(CalisanMaaslari, {
     employees: employees,
     addEmployee: addEmployee,
@@ -5758,7 +6203,7 @@ function EtiketlerView({
   };
   const statFor = tagId => {
     const txs = transactions.filter(t => (t.tags || []).includes(tagId));
-    const net = txs.reduce((s, t) => s + (t.type === "gelir" ? Number(t.amount) : -Number(t.amount)), 0);
+    const net = txs.filter(isRealized).reduce((s, t) => s + (t.type === "gelir" ? Number(t.amount) : -Number(t.amount)), 0);
     const supCount = supplierTx.filter(t => (t.tags || []).includes(tagId)).length;
     const rxCount = prescriptions.filter(p => (p.tags || []).includes(tagId)).length;
     return {
@@ -8833,10 +9278,44 @@ function App() {
   const [leaves, setLeaves] = useState([]);
   const [taskTemplates, setTaskTemplates] = useState([]);
   const [taskStatuses, setTaskStatuses] = useState([]);
+  const [recurringTemplates, setRecurringTemplates] = useState([]);
   useEffect(() => {
     (async () => {
-      const [t, s, st, p, emp, acc, tg, cnt, crd, chg, ded, ret, lv, tt, ts] = await Promise.all([loadKey("ecz-transactions", []), loadKey("ecz-suppliers", []), loadKey("ecz-supplier-tx", []), loadKey("ecz-prescriptions", []), loadKey("ecz-employees", []), loadKey("ecz-accounts", []), loadKey("ecz-tags", []), loadKey("ecz-daily-counts", []), loadKey("ecz-cards", []), loadKey("ecz-card-charges", []), loadKey("ecz-deductions", []), loadKey("ecz-returns", []), loadKey("ecz-leaves", []), loadKey("ecz-task-templates", null), loadKey("ecz-task-statuses", [])]);
-      setTransactions(t);
+      const [t, s, st, p, emp, acc, tg, cnt, crd, chg, ded, ret, lv, tt, ts, rt] = await Promise.all([loadKey("ecz-transactions", []), loadKey("ecz-suppliers", []), loadKey("ecz-supplier-tx", []), loadKey("ecz-prescriptions", []), loadKey("ecz-employees", []), loadKey("ecz-accounts", []), loadKey("ecz-tags", []), loadKey("ecz-daily-counts", []), loadKey("ecz-cards", []), loadKey("ecz-card-charges", []), loadKey("ecz-deductions", []), loadKey("ecz-returns", []), loadKey("ecz-leaves", []), loadKey("ecz-task-templates", null), loadKey("ecz-task-statuses", []), loadKey("ecz-recurring-templates", [])]);
+      /* Tekrarlama şablonlarının vadesi gelmiş/geçmiş occurrence'larını, uygulama
+         her açıldığında "bekliyor" durumunda birer gider/gelir kaydı olarak
+         oluşturur (kullanıcı hiç açmasa bile geciken dönemler geriye dönük
+         tamamlanır, en fazla 24 dönem — sonsuz döngüye karşı güvenlik sınırı). */
+      let genTx = [];
+      const updatedTemplates = (rt || []).map(tpl => {
+        if (!tpl.active) return tpl;
+        let next = tpl.nextDueDate;
+        let guard = 0;
+        while (next <= todayStr() && guard < 24) {
+          genTx.push({
+            id: uid(),
+            type: tpl.kind,
+            [tpl.kind === "gider" ? "giderTuru" : "gelirTuru"]: "genel",
+            category: tpl.category,
+            description: tpl.description,
+            amount: Number(tpl.amount),
+            date: next,
+            tags: tpl.tags || [],
+            paymentMethod: tpl.paymentMethod,
+            accountId: tpl.accountId,
+            accountName: acc.find(a => a.id === tpl.accountId)?.name || null,
+            status: "bekliyor",
+            recurringTemplateId: tpl.id
+          });
+          next = nextRecurringDate(next, tpl.frequency);
+          guard++;
+        }
+        return next === tpl.nextDueDate ? tpl : { ...tpl, nextDueDate: next };
+      });
+      const finalTx = genTx.length ? [...t, ...genTx] : t;
+      if (genTx.length) saveKey("ecz-transactions", finalTx);
+      if (genTx.length) saveKey("ecz-recurring-templates", updatedTemplates);
+      setTransactions(finalTx);
       setSuppliers(s);
       setSupplierTx(st);
       setPrescriptions(p);
@@ -8860,6 +9339,7 @@ function App() {
         setTaskTemplates(tt);
       }
       setTaskStatuses(ts);
+      setRecurringTemplates(updatedTemplates);
       setLoading(false);
     })();
   }, []);
@@ -9002,6 +9482,16 @@ function App() {
       return next;
     });
   }, []);
+  const addRecurringTemplate = useCallback(tpl => setRecurringTemplates(prev => {
+    const next = [...prev, tpl];
+    saveKey("ecz-recurring-templates", next);
+    return next;
+  }), []);
+  const removeRecurringTemplate = useCallback(id => setRecurringTemplates(prev => {
+    const next = prev.filter(rt => rt.id !== id);
+    saveKey("ecz-recurring-templates", next);
+    return next;
+  }), []);
   const addSupplier = useCallback(s => setSuppliers(prev => {
     const next = [...prev, s];
     saveKey("ecz-suppliers", next);
@@ -9612,7 +10102,8 @@ function App() {
         taskTemplates,
         taskStatuses,
         authUsers,
-        authSettings
+        authSettings,
+        recurringTemplates
       }
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], {
@@ -9648,6 +10139,7 @@ function App() {
     await setAndSave("ecz-leaves", setLeaves, d.leaves);
     await setAndSave("ecz-task-templates", setTaskTemplates, d.taskTemplates);
     await setAndSave("ecz-task-statuses", setTaskStatuses, d.taskStatuses);
+    await setAndSave("ecz-recurring-templates", setRecurringTemplates, d.recurringTemplates);
     // Kullanıcı hesapları: eski bir yedekte bu alan yoksa (veya boşsa) mevcut
     // kullanıcıları SİLME — yoksa geri yükleme sırasında kimse giriş yapamaz
     // hale gelebilir. Sadece yedekte gerçekten kullanıcı varsa üzerine yaz.
@@ -10509,7 +11001,10 @@ function App() {
     removeEmployee: removeEmployee,
     tags: tags,
     addTag: addTag,
-    accounts: accounts
+    accounts: accounts,
+    recurringTemplates: recurringTemplates,
+    addRecurringTemplate: addRecurringTemplate,
+    removeRecurringTemplate: removeRecurringTemplate
   }), tab === "tedarikci" && /*#__PURE__*/React.createElement(SuppliersView, {
     suppliers: suppliers,
     supplierTx: supplierTx,

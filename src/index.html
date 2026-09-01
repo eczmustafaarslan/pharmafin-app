@@ -4454,7 +4454,10 @@ function CalisanMaaslari({
   removeTx,
   tags,
   addTag,
-  accounts
+  accounts,
+  recurringTemplates,
+  addRecurringTemplate,
+  removeRecurringTemplate
 }) {
   const [openEmp, setOpenEmp] = useState(false);
   const [editingEmpId, setEditingEmpId] = useState(null);
@@ -4476,111 +4479,53 @@ function CalisanMaaslari({
     setOpenEmp(true);
   };
   const [activeEmp, setActiveEmp] = useState(null);
+  const [expandedId, setExpandedId] = useState(null);
+  const [openPayForm, setOpenPayForm] = useState(false);
   const [editingPayId, setEditingPayId] = useState(null);
-  const [payForm, setPayForm] = useState({
+  const blankPayForm = {
     date: todayStr(),
-    month: todayStr().slice(0, 7),
+    dueDate: todayStr(),
     amount: "",
-    note: "",
-    tags: [],
+    status: "bekliyor",
     paymentMethod: "hesaptan",
-    accountId: accounts[0]?.id || ""
-  });
+    accountId: accounts[0]?.id || "",
+    recurring: false,
+    freqType: "monthly",
+    intervalDays: "30"
+  };
+  const [payForm, setPayForm] = useState(blankPayForm);
   const startEditPay = p => {
     setEditingPayId(p.id);
     setActiveEmp(p.employeeId);
+    setExpandedId(null);
     setPayForm({
       date: p.date || todayStr(),
-      month: p.month || todayStr().slice(0, 7),
+      dueDate: p.dueDate || p.date || todayStr(),
       amount: p.amount ?? "",
-      note: p.note || "",
-      tags: p.tags || [],
-      paymentMethod: p.paymentMethod || "hesaptan",
-      accountId: p.accountId || accounts[0]?.id || ""
+      status: "bekliyor",
+      paymentMethod: "hesaptan",
+      accountId: accounts[0]?.id || "",
+      recurring: false,
+      freqType: "monthly",
+      intervalDays: "30"
     });
+    setOpenPayForm(true);
   };
-  const payments = transactions.filter(t => t.type === "gider" && t.giderTuru === "maas");
-  const monthNow = todayStr().slice(0, 7);
-  const paidThisMonthByEmp = {};
-  payments.forEach(p => {
-    if (p.month === monthNow) {
-      paidThisMonthByEmp[p.employeeId] = (paidThisMonthByEmp[p.employeeId] || 0) + Number(p.amount);
-    }
-  });
+  /* Maaş/Prim kayıtları artık Paraşüt'teki gibi AÇIKÇA oluşturulan, bağımsız
+     kayıtlardır (payments[] ile parçalı ödeme desteği dahil). Hiçbir ay,
+     çalışanın işe başlama tarihine bakılarak otomatik "borç" sayılmaz —
+     sadece burada gerçekten var olan bir kayıt varsa (elle ya da aşağıdaki
+     tekrarlama şablonuyla oluşturulmuş) borç/kalan hesaba katılır. */
+  const maasKayitlari = transactions.filter(t => t.type === "gider" && t.giderTuru === "maas");
   const totalPayroll = employees.reduce((s, e) => s + Number(e.salary || 0), 0);
-  const totalPaid = payments.reduce((s, p) => s + Number(p.amount), 0);
-  const totalRemainingThisMonth = employees.reduce((s, e) => s + Math.max(0, Number(e.salary || 0) - (paidThisMonthByEmp[e.id] || 0)), 0);
+  const totalPaid = maasKayitlari.reduce((s, t) => s + paidAmountOf(t), 0);
+  const totalKalan = maasKayitlari.reduce((s, t) => s + kalanOf(t), 0);
   const activeEmpObj = employees.find(e => e.id === activeEmp) || null;
-  const selMonthPaid = activeEmp ? payments.filter(p => p.employeeId === activeEmp && p.month === payForm.month && p.id !== editingPayId).reduce((s, p) => s + Number(p.amount), 0) : 0;
-  const selMonthRemaining = activeEmpObj ? Number(activeEmpObj.salary || 0) - selMonthPaid : 0;
-  const empAllPayments = activeEmp ? payments.filter(p => p.employeeId === activeEmp) : [];
-  const empMonthsSet = new Set(empAllPayments.map(p => p.month));
-  /* Çalışanın işe giriş tarihinden bu aya kadar geçen HER ay, o ayın hiç
-     ödemesi olmasa bile "Aylık Özet"te ayrı bir satır olarak görünür —
-     böylece atlanan bir ay hiçbir zaman görünmez olmaz ve borcu bir
-     sonraki ayın tutarına eklenmez, kendi ayrı kaydı olarak birikir. */
-  if (activeEmp) {
-    const startMonth = activeEmpObj?.hireDate ? activeEmpObj.hireDate.slice(0, 7) : monthNow;
-    monthsBetweenInclusive(startMonth, monthNow).forEach(m => empMonthsSet.add(m));
-  }
-  const monthlyBreakdown = [...empMonthsSet].sort((a, b) => b.localeCompare(a)).slice(0, 24).map(m => {
-    const paid = empAllPayments.filter(p => p.month === m).reduce((s, p) => s + Number(p.amount), 0);
-    const remain = Number(activeEmpObj?.salary || 0) - paid;
-    const status = paid <= 0 ? "bekliyor" : remain > 0 ? "kismi" : "odendi";
-    return {
-      month: m,
-      paid: paid,
-      remain: remain,
-      status: status
-    };
-  });
-  const monthlyBreakdownEl = activeEmp && monthlyBreakdown.length > 0 ? /*#__PURE__*/React.createElement("div", {
-    style: {
-      marginTop: 18,
-      paddingTop: 14,
-      borderTop: `1px solid ${C.paperDark}`
-    }
-  }, /*#__PURE__*/React.createElement("h4", {
-    style: {
-      fontSize: 13,
-      fontWeight: 700,
-      color: C.muted,
-      margin: "0 0 8px",
-      textTransform: "uppercase",
-      letterSpacing: 0.4
-    }
-  }, "Aylık Özet"), monthlyBreakdown.map(row => /*#__PURE__*/React.createElement("div", {
-    key: row.month,
-    style: {
-      display: "flex",
-      justifyContent: "space-between",
-      alignItems: "center",
-      padding: "7px 0",
-      borderBottom: `1px solid ${C.paperDark}`,
-      fontSize: 13
-    }
-  }, /*#__PURE__*/React.createElement("span", null, row.month), /*#__PURE__*/React.createElement("span", {
-    className: "ecz-mono",
-    style: {
-      color: C.muted
-    }
-  }, "Ödenen: ", fmt(row.paid)), /*#__PURE__*/React.createElement("span", {
-    style: {
-      fontSize: 10.5,
-      fontWeight: 700,
-      padding: "2px 8px",
-      borderRadius: 20,
-      marginRight: 8,
-      background: row.status === "odendi" ? C.greenSoft : row.status === "kismi" ? C.amberSoft : C.redSoft,
-      color: row.status === "odendi" ? C.green : row.status === "kismi" ? C.amber : C.red
-    }
-  }, row.status === "odendi" ? "Ödendi" : row.status === "kismi" ? "Kısmi Ödendi" : "Bekliyor"), /*#__PURE__*/React.createElement("span", {
-    className: "ecz-mono",
-    style: {
-      fontWeight: 700,
-      color: row.remain > 0 ? C.red : C.green
-    }
-  }, row.remain > 0 ? `Kalan: ${fmt(row.remain)}` : row.remain < 0 ? `Fazla: ${fmt(Math.abs(row.remain))}` : "Tam ödendi")))) : null;
+  const empKayitlari = activeEmp ? [...maasKayitlari].filter(t => t.employeeId === activeEmp).sort((a, b) => new Date(b.date) - new Date(a.date)) : [];
+  const empKalanToplam = empKayitlari.reduce((s, t) => s + kalanOf(t), 0);
+  const empGecikmisToplam = empKayitlari.filter(t => (t.dueDate || t.date) < todayStr()).reduce((s, t) => s + kalanOf(t), 0);
+  const empOdenenToplam = empKayitlari.reduce((s, t) => s + paidAmountOf(t), 0);
+  const myTemplates = (recurringTemplates || []).filter(rt => rt.kind === "maas" && rt.employeeId === activeEmp);
   const submitEmp = e => {
     e.preventDefault();
     if (!empForm.name || !empForm.salary) return;
@@ -4603,532 +4548,355 @@ function CalisanMaaslari({
   const submitPay = e => {
     e.preventDefault();
     if (!activeEmp || !payForm.amount) return;
-    if (payForm.paymentMethod === "hesaptan" && !payForm.accountId) {
-      alert("Hesaptan ödeme seçtin ama hangi kasa/banka hesabından düşüleceğini seçmedin. Lütfen bir hesap seç ya da 'Elden' ödeme seçeneğini kullan.");
+    if (payForm.status === "odendi" && payForm.paymentMethod === "hesaptan" && !payForm.accountId) {
+      alert("Hesaptan ödendi seçtin ama hangi kasa/banka hesabından düşüleceğini seçmedin. Lütfen bir hesap seç ya da 'Elden' ödeme seçeneğini kullan.");
       return;
     }
-    const emp = employees.find(x => x.id === activeEmp);
-    const account = payForm.paymentMethod === "hesaptan" ? accounts.find(a => a.id === payForm.accountId) : null;
+    const account = payForm.status === "odendi" && payForm.paymentMethod === "hesaptan" ? accounts.find(a => a.id === payForm.accountId) : null;
     const payload = {
       type: "gider",
       giderTuru: "maas",
       employeeId: activeEmp,
-      month: payForm.month,
       date: payForm.date,
+      dueDate: payForm.dueDate || payForm.date,
       amount: Number(payForm.amount),
       category: "Çalışan Maaşı",
-      description: `${emp?.name || ""} — ${payForm.month}`,
-      tags: payForm.tags,
-      paymentMethod: payForm.paymentMethod,
-      accountId: payForm.paymentMethod === "hesaptan" ? payForm.accountId : null,
-      accountName: account ? account.bankName || account.name : null,
-      note: payForm.note
+      description: `${activeEmpObj?.name || ""} — ${fmtDate(payForm.date)}`
     };
     if (editingPayId) {
       editTx(editingPayId, payload);
     } else {
+      let templateId = null;
+      if (payForm.recurring) {
+        templateId = uid();
+        const freq = payForm.freqType === "custom" ? {
+          type: "custom",
+          intervalDays: Number(payForm.intervalDays) || 30
+        } : {
+          type: "monthly"
+        };
+        addRecurringTemplate({
+          id: templateId,
+          kind: "maas",
+          employeeId: activeEmp,
+          amount: Number(payForm.amount),
+          frequency: freq,
+          nextDueDate: nextRecurringDate(payForm.date, freq),
+          active: true
+        });
+      }
       addTx({
         id: uid(),
-        ...payload
+        ...payload,
+        payments: payForm.status === "odendi" ? [{
+          id: uid(),
+          date: payForm.date,
+          amount: Number(payForm.amount),
+          paymentMethod: payForm.paymentMethod,
+          accountId: payForm.paymentMethod === "hesaptan" ? payForm.accountId : null,
+          accountName: account ? account.bankName || account.name : null
+        }] : [],
+        recurringTemplateId: templateId
       });
     }
-    const newRemaining = Number(emp?.salary || 0) - (selMonthPaid + Number(payForm.amount));
     setPayForm({
-      date: todayStr(),
-      month: payForm.month,
-      amount: newRemaining > 0 ? newRemaining : "",
-      note: "",
-      tags: [],
-      paymentMethod: payForm.paymentMethod,
+      ...blankPayForm,
       accountId: payForm.accountId
     });
     setEditingPayId(null);
+    setOpenPayForm(false);
   };
-  return /*#__PURE__*/React.createElement("div", {
-    className: "fadein",
-    style: {
-      display: "flex",
-      flexDirection: "column",
-      gap: 16
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "grid",
-      gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))",
-      gap: 18
-    }
-  }, /*#__PURE__*/React.createElement(KpiTicket, {
-    icon: Users,
-    label: "Aylık Toplam Bordro",
-    value: fmt(totalPayroll),
-    accent: C.amber,
-    sub: `${employees.length} çalışan`
-  }), /*#__PURE__*/React.createElement(KpiTicket, {
-    icon: Banknote,
-    label: "Toplam Ödenen Maaş",
-    value: fmt(totalPaid),
-    accent: C.red
-  }), /*#__PURE__*/React.createElement(KpiTicket, {
-    icon: Wallet,
-    label: "Bu Ay Kalan Bordro",
-    value: fmt(totalRemainingThisMonth),
-    accent: C.amber
-  })), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "flex",
-      justifyContent: "flex-end"
-    }
-  }, /*#__PURE__*/React.createElement("button", {
-    onClick: () => {
-      setEditingEmpId(null);
-      setEmpForm(blankEmpForm);
-      setOpenEmp(o => !o);
+  const tdStyle = {
+    padding: "10px 16px",
+    color: C.muted
+  };
+
+  /* ---- KPI satırı ---- */
+  const kpiRowEl = React.createElement("div", {
+    style: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 18 }
+  },
+    React.createElement(KpiTicket, { icon: Users, label: "Aylık Net Bordro", value: fmt(totalPayroll), accent: C.amber, sub: `${employees.length} çalışan` }),
+    React.createElement(KpiTicket, { icon: Banknote, label: "Toplam Ödenen Maaş", value: fmt(totalPaid), accent: C.red }),
+    React.createElement(KpiTicket, { icon: Wallet, label: "Bekleyen Maaş Bordrosu", value: fmt(totalKalan), accent: C.amber })
+  );
+
+  /* ---- Çalışan ekle butonu + formu ---- */
+  const addEmpButtonEl = React.createElement("div", { style: { display: "flex", justifyContent: "flex-end" } },
+    React.createElement("button", {
+      onClick: () => { setEditingEmpId(null); setEmpForm(blankEmpForm); setOpenEmp(o => !o); },
+      style: { display: "flex", alignItems: "center", gap: 6, background: C.accent, color: "#fff", border: "none", borderRadius: 6, padding: "9px 14px", fontSize: 13, fontWeight: 600, cursor: "pointer" }
     },
-    style: {
-      display: "flex",
-      alignItems: "center",
-      gap: 6,
-      background: C.accent,
-      color: "#fff",
-      border: "none",
-      borderRadius: 6,
-      padding: "9px 14px",
-      fontSize: 13,
-      fontWeight: 600,
-      cursor: "pointer"
-    }
-  }, openEmp ? /*#__PURE__*/React.createElement(X, {
-    size: 15
-  }) : /*#__PURE__*/React.createElement(Plus, {
-    size: 15
-  }), " ", openEmp ? "Kapat" : "Çalışan Ekle")), openEmp && /*#__PURE__*/React.createElement("form", {
+      openEmp ? React.createElement(X, { size: 15 }) : React.createElement(Plus, { size: 15 }),
+      " ",
+      openEmp ? "Kapat" : "Çalışan Ekle"
+    )
+  );
+
+  const empFormEl = !openEmp ? null : React.createElement("form", {
     onSubmit: submitEmp,
     className: "fadein",
-    style: {
-      background: C.card,
-      borderRadius: 18,
-      padding: 18,
-      display: "grid",
-      gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))",
-      gap: 12,
-      border: "none",
-      boxShadow: "0 1px 2px rgba(20,20,16,0.03), 0 10px 26px rgba(20,20,16,0.06)"
-    }
-  }, /*#__PURE__*/React.createElement(Field, {
-    label: "Ad Soyad"
-  }, /*#__PURE__*/React.createElement("input", {
-    style: inputStyle,
-    value: empForm.name,
-    onChange: e => setEmpForm({
-      ...empForm,
-      name: e.target.value
-    })
-  })), /*#__PURE__*/React.createElement(Field, {
-    label: "Pozisyon"
-  }, /*#__PURE__*/React.createElement("input", {
-    style: inputStyle,
-    placeholder: "Örn. Eczane Teknisyeni",
-    value: empForm.position,
-    onChange: e => setEmpForm({
-      ...empForm,
-      position: e.target.value
-    })
-  })), /*#__PURE__*/React.createElement(Field, {
-    label: "Aylık Net Maaş (₺)"
-  }, /*#__PURE__*/React.createElement(TutarInput, {
-    style: inputStyle,
-    value: empForm.salary,
-    onChange: e => setEmpForm({
-      ...empForm,
-      salary: e.target.value
-    })
-  })), /*#__PURE__*/React.createElement(Field, {
-    label: "İşe Başlama Tarihi"
-  }, /*#__PURE__*/React.createElement("input", {
-    type: "date",
-    style: inputStyle,
-    value: empForm.hireDate,
-    onChange: e => setEmpForm({
-      ...empForm,
-      hireDate: e.target.value
-    })
-  })), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "flex",
-      alignItems: "flex-end"
-    }
-  }, /*#__PURE__*/React.createElement("button", {
-    type: "submit",
-    style: {
-      background: C.green,
-      color: "#fff",
-      border: "none",
-      borderRadius: 6,
-      padding: "9px 16px",
-      fontSize: 13,
-      fontWeight: 600,
-      cursor: "pointer",
-      width: "100%"
-    }
-  }, editingEmpId ? "Güncelle" : "Kaydet"))), employees.length === 0 ? /*#__PURE__*/React.createElement("div", {
-    style: {
-      background: C.card,
-      borderRadius: 18,
-      border: "none",
-      boxShadow: "0 1px 2px rgba(20,20,16,0.03), 0 10px 26px rgba(20,20,16,0.06)"
-    }
-  }, /*#__PURE__*/React.createElement(EmptyState, {
-    text: "Henüz çalışan eklenmedi."
-  })) : /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "grid",
-      gridTemplateColumns: "minmax(230px,300px) 1fr",
-      gap: 18
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "flex",
-      flexDirection: "column",
-      gap: 10
-    }
-  }, employees.map(emp => {
+    style: { background: C.card, borderRadius: 18, padding: 18, display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 12, border: "none", boxShadow: "0 1px 2px rgba(20,20,16,0.03), 0 10px 26px rgba(20,20,16,0.06)" }
+  },
+    React.createElement(Field, { label: "Ad Soyad" },
+      React.createElement("input", { style: inputStyle, value: empForm.name, onChange: e => setEmpForm({ ...empForm, name: e.target.value }) })
+    ),
+    React.createElement(Field, { label: "Pozisyon" },
+      React.createElement("input", { style: inputStyle, placeholder: "Örn. Eczane Teknisyeni", value: empForm.position, onChange: e => setEmpForm({ ...empForm, position: e.target.value }) })
+    ),
+    React.createElement(Field, { label: "Aylık Net Maaş (₺)" },
+      React.createElement(TutarInput, { style: inputStyle, value: empForm.salary, onChange: e => setEmpForm({ ...empForm, salary: e.target.value }) })
+    ),
+    React.createElement(Field, { label: "İşe Başlama Tarihi" },
+      React.createElement("input", { type: "date", style: inputStyle, value: empForm.hireDate, onChange: e => setEmpForm({ ...empForm, hireDate: e.target.value }) }),
+      React.createElement("div", { style: { fontSize: 11, color: C.muted, marginTop: 4 } }, "Sadece kayıt amaçlı — maaş borcu hesaplamasında kullanılmaz.")
+    ),
+    React.createElement("div", { style: { display: "flex", alignItems: "flex-end" } },
+      React.createElement("button", {
+        type: "submit",
+        style: { background: C.green, color: "#fff", border: "none", borderRadius: 6, padding: "9px 16px", fontSize: 13, fontWeight: 600, cursor: "pointer", width: "100%" }
+      }, editingEmpId ? "Güncelle" : "Kaydet")
+    )
+  );
+
+  /* ---- Sol taraf: çalışan listesi ---- */
+  const employeeRows = employees.map(emp => {
     const isActive = activeEmp === emp.id;
-    const paidThisMonthAmount = paidThisMonthByEmp[emp.id] || 0;
-    const remainingThisMonth = Number(emp.salary || 0) - paidThisMonthAmount;
-    const payStatus = paidThisMonthAmount <= 0 ? "unpaid" : remainingThisMonth > 0 ? "partial" : "paid";
-    /* Geçmiş aylardan kalan (henüz ödenmemiş/kısmi ödenmiş) maaş borcu: her
-       ay kendi ayrı kaydı olarak birikir, bir sonraki ayın tutarına
-       eklenmez — sadece toplamda görünürlük için ayrıca hesaplanır. */
-    const empPaymentsAll = payments.filter(p => p.employeeId === emp.id);
-    const empDueMonthsAll = monthsBetweenInclusive(emp.hireDate ? emp.hireDate.slice(0, 7) : monthNow, monthNow);
-    const arrears = empDueMonthsAll.filter(m => m !== monthNow).reduce((s, m) => {
-      const paidM = empPaymentsAll.filter(p => p.month === m).reduce((ss, p) => ss + Number(p.amount), 0);
-      return s + Math.max(0, Number(emp.salary || 0) - paidM);
-    }, 0);
-    return /*#__PURE__*/React.createElement("div", {
+    const empRecs = maasKayitlari.filter(t => t.employeeId === emp.id);
+    const kalan = empRecs.reduce((s, t) => s + kalanOf(t), 0);
+    const gecikmis = empRecs.filter(t => (t.dueDate || t.date) < todayStr()).reduce((s, t) => s + kalanOf(t), 0);
+    const badgeEl = gecikmis > 0
+      ? React.createElement("span", {
+          style: { display: "inline-block", marginTop: 6, fontSize: 11, fontWeight: 700, padding: "3px 8px", borderRadius: 20, background: isActive ? "rgba(0,0,0,0.32)" : C.redSoft, color: isActive ? "#fff" : C.red }
+        }, "Gecikmiş: ", fmt(gecikmis))
+      : kalan > 0
+      ? React.createElement("span", {
+          style: { display: "inline-block", marginTop: 6, fontSize: 11, fontWeight: 700, padding: "3px 8px", borderRadius: 20, background: isActive ? "rgba(255,255,255,0.92)" : C.amberSoft, color: C.amber }
+        }, "Ödenecek: ", fmt(kalan))
+      : empRecs.length > 0
+      ? React.createElement("span", {
+          style: { display: "inline-block", marginTop: 6, fontSize: 11, fontWeight: 700, padding: "3px 8px", borderRadius: 20, background: isActive ? "rgba(255,255,255,0.92)" : C.greenSoft, color: C.green }
+        }, "Tüm maaşlar ödendi")
+      : null;
+    return React.createElement("div", {
       key: emp.id,
+      onClick: () => { setActiveEmp(emp.id); setEditingPayId(null); setExpandedId(null); setOpenPayForm(false); },
+      style: { cursor: "pointer", background: isActive ? C.accent : C.card, color: isActive ? "#fff" : C.text, borderRadius: 8, padding: 14, border: isActive ? `1px solid ${C.accent}` : `1px solid ${C.line}` }
+    },
+      React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
+        React.createElement("span", { style: { fontWeight: 600, fontSize: 14 } }, emp.name),
+        React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
+          React.createElement("button", {
+            onClick: e => { e.stopPropagation(); startEditEmp(emp); },
+            title: "Düzenle",
+            style: { background: "none", border: "none", cursor: "pointer", color: isActive ? "#ffffffaa" : C.muted }
+          }, React.createElement(Pencil, { size: 13 })),
+          React.createElement("button", {
+            onClick: e => { e.stopPropagation(); removeEmployee(emp.id); },
+            title: "Sil",
+            style: { background: "none", border: "none", cursor: "pointer", color: isActive ? "#ffffffaa" : C.muted }
+          }, React.createElement(Trash2, { size: 13 }))
+        )
+      ),
+      emp.position ? React.createElement("div", { style: { fontSize: 12, color: isActive ? "#ffffff99" : C.muted, marginTop: 3 } }, emp.position) : null,
+      React.createElement("div", { className: "ecz-mono", style: { marginTop: 6, fontSize: 13, fontWeight: 600 } }, fmt(emp.salary), " / ay"),
+      badgeEl
+    );
+  });
+
+  const employeeListEl = React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 10 } }, employeeRows);
+
+  /* ---- Sağ taraf: seçili çalışanın maaş/prim kayıtları ---- */
+  const summaryStripEl = React.createElement("div", {
+    style: { display: "flex", flexWrap: "wrap", gap: 16, padding: "10px 14px", background: C.paper, borderRadius: 10, fontSize: 13, marginBottom: 14 }
+  },
+    React.createElement("span", null, "Toplam ödenen: ", React.createElement("b", { className: "ecz-mono", style: { color: C.green } }, fmt(empOdenenToplam))),
+    React.createElement("span", null, "Bekleyen: ", React.createElement("b", { className: "ecz-mono", style: { color: empKalanToplam > 0 ? C.amber : C.green } }, fmt(empKalanToplam))),
+    empGecikmisToplam > 0 ? React.createElement("span", null, "Gecikmiş: ", React.createElement("b", { className: "ecz-mono", style: { color: C.red } }, fmt(empGecikmisToplam))) : null
+  );
+
+  const togglePayFormButtonEl = React.createElement("div", { style: { display: "flex", justifyContent: "flex-end", marginBottom: 12 } },
+    React.createElement("button", {
       onClick: () => {
-        setActiveEmp(emp.id);
-        setEditingPayId(null);
-        const remain = Number(emp.salary || 0) - (paidThisMonthByEmp[emp.id] || 0);
-        setPayForm(f => ({
-          ...f,
-          month: monthNow,
-          amount: remain > 0 ? remain : emp.salary
-        }));
+        if (openPayForm) {
+          setOpenPayForm(false);
+          setEditingPayId(null);
+        } else {
+          setEditingPayId(null);
+          setPayForm({ ...blankPayForm, amount: activeEmpObj?.salary ?? "", accountId: payForm.accountId });
+          setOpenPayForm(true);
+        }
       },
-      style: {
-        cursor: "pointer",
-        background: isActive ? C.accent : C.card,
-        color: isActive ? "#fff" : C.text,
-        borderRadius: 8,
-        padding: 14,
-        border: isActive ? `1px solid ${C.accent}` : `1px solid ${C.line}`
-      }
-    }, /*#__PURE__*/React.createElement("div", {
-      style: {
-        display: "flex",
-        justifyContent: "space-between",
-        alignItems: "center"
-      }
-    }, /*#__PURE__*/React.createElement("span", {
-      style: {
-        fontWeight: 600,
-        fontSize: 14
-      }
-    }, emp.name), /*#__PURE__*/React.createElement("div", {
-      style: {
-        display: "flex",
-        alignItems: "center",
-        gap: 8
-      }
-    }, /*#__PURE__*/React.createElement("button", {
-      onClick: e => {
-        e.stopPropagation();
-        startEditEmp(emp);
-      },
-      title: "Düzenle",
-      style: {
-        background: "none",
-        border: "none",
-        cursor: "pointer",
-        color: isActive ? "#ffffffaa" : C.muted
-      }
-    }, /*#__PURE__*/React.createElement(Pencil, {
-      size: 13
-    })), /*#__PURE__*/React.createElement("button", {
-      onClick: e => {
-        e.stopPropagation();
-        removeEmployee(emp.id);
-      },
-      title: "Sil",
-      style: {
-        background: "none",
-        border: "none",
-        cursor: "pointer",
-        color: isActive ? "#ffffffaa" : C.muted
-      }
-    }, /*#__PURE__*/React.createElement(Trash2, {
-      size: 13
-    })))), emp.position && /*#__PURE__*/React.createElement("div", {
-      style: {
-        fontSize: 12,
-        color: isActive ? "#ffffff99" : C.muted,
-        marginTop: 3
-      }
-    }, emp.position), /*#__PURE__*/React.createElement("div", {
-      className: "ecz-mono",
-      style: {
-        marginTop: 6,
-        fontSize: 13,
-        fontWeight: 600
-      }
-    }, fmt(emp.salary), " / ay"), payStatus === "partial" && /*#__PURE__*/React.createElement("div", {
-      className: "ecz-mono",
-      style: {
-        marginTop: 2,
-        fontSize: 11,
-        color: isActive ? "#ffffffcc" : C.red
-      }
-    }, "Kalan: ", fmt(remainingThisMonth)), /*#__PURE__*/React.createElement("span", {
-      style: {
-        display: "inline-block",
-        marginTop: 6,
-        fontSize: 11,
-        fontWeight: 700,
-        padding: "3px 8px",
-        borderRadius: 20,
-        background: payStatus === "paid" ? isActive ? "rgba(255,255,255,0.92)" : C.greenSoft : payStatus === "partial" ? isActive ? "rgba(255,255,255,0.92)" : C.amberSoft : isActive ? "rgba(0,0,0,0.32)" : C.redSoft,
-        color: payStatus === "paid" ? C.green : payStatus === "partial" ? C.amber : isActive ? "#fff" : C.red
-      }
-    }, payStatus === "paid" ? "Bu ay ödendi" : payStatus === "partial" ? "Bu ay kısmi ödendi" : "Bu ay ödenmedi"), arrears > 0 && /*#__PURE__*/React.createElement("span", {
-      style: {
-        display: "inline-block",
-        marginLeft: 6,
-        marginTop: 6,
-        fontSize: 11,
-        fontWeight: 700,
-        padding: "3px 8px",
-        borderRadius: 20,
-        background: isActive ? "rgba(0,0,0,0.32)" : C.redSoft,
-        color: isActive ? "#fff" : C.red
-      }
-    }, "Geçmiş dönem kalan: ", fmt(arrears)));
-  })), /*#__PURE__*/React.createElement("div", {
-    style: {
-      background: C.card,
-      borderRadius: 18,
-      padding: 18,
-      border: "none",
-      boxShadow: "0 1px 2px rgba(20,20,16,0.03), 0 10px 26px rgba(20,20,16,0.06)"
-    }
-  }, !activeEmp ? /*#__PURE__*/React.createElement(EmptyState, {
-    text: "Maaş ödemesi görmek/eklemek için soldan bir çalışan seç."
-  }) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("h3", {
-    className: "ecz-display",
-    style: {
-      fontSize: 15,
-      fontWeight: 600,
-      margin: "0 0 12px",
-      color: C.ink
-    }
-  }, activeEmpObj?.name, " — Maaş Ödemeleri"), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "flex",
-      flexWrap: "wrap",
-      gap: 16,
-      padding: "10px 14px",
-      background: C.paper,
-      borderRadius: 10,
-      fontSize: 13,
-      marginBottom: 14
-    }
-  }, /*#__PURE__*/React.createElement("span", null, payForm.month, " maaşı: ", /*#__PURE__*/React.createElement("b", {
-    className: "ecz-mono"
-  }, fmt(activeEmpObj?.salary || 0))), /*#__PURE__*/React.createElement("span", null, "Ödenen: ", /*#__PURE__*/React.createElement("b", {
-    className: "ecz-mono",
-    style: {
-      color: C.green
-    }
-  }, fmt(selMonthPaid))), /*#__PURE__*/React.createElement("span", null, selMonthRemaining > 0 ? "Kalan: " : selMonthRemaining < 0 ? "Fazla ödenen: " : "Durum: ", /*#__PURE__*/React.createElement("b", {
-    className: "ecz-mono",
-    style: {
-      color: selMonthRemaining > 0 ? C.red : C.green
-    }
-  }, selMonthRemaining !== 0 ? fmt(Math.abs(selMonthRemaining)) : "Tam ödendi"))), /*#__PURE__*/React.createElement("form", {
+      style: { display: "flex", alignItems: "center", gap: 6, background: C.accent, color: "#fff", border: "none", borderRadius: 6, padding: "9px 14px", fontSize: 13, fontWeight: 600, cursor: "pointer" }
+    },
+      openPayForm ? React.createElement(X, { size: 15 }) : React.createElement(Plus, { size: 15 }),
+      " ",
+      openPayForm ? "Kapat" : "Yeni Maaş / Prim"
+    )
+  );
+
+  const recurringFieldsEl = !payForm.recurring ? null : React.createElement("div", {
+    style: { display: "grid", gridTemplateColumns: payForm.freqType === "custom" ? "160px 160px" : "160px", gap: 10 }
+  },
+    React.createElement("select", { style: inputStyle, value: payForm.freqType, onChange: e => setPayForm({ ...payForm, freqType: e.target.value }) },
+      React.createElement("option", { value: "monthly" }, "Aylık"),
+      React.createElement("option", { value: "custom" }, "Serbest gün aralığı")
+    ),
+    payForm.freqType === "custom" ? React.createElement("input", {
+      type: "number", min: "1", style: inputStyle, placeholder: "Kaç günde bir?",
+      value: payForm.intervalDays, onChange: e => setPayForm({ ...payForm, intervalDays: e.target.value })
+    }) : null
+  );
+
+  const recurringToggleEl = !editingPayId ? React.createElement("div", {
+    style: { display: "flex", flexDirection: "column", gap: 10, background: C.paperDark, borderRadius: 10, padding: 12 }
+  },
+    React.createElement("label", { style: { display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 600, cursor: "pointer" } },
+      React.createElement("input", { type: "checkbox", checked: payForm.recurring, onChange: e => setPayForm({ ...payForm, recurring: e.target.checked }) }),
+      React.createElement(RotateCcw, { size: 14 }),
+      " Bu düzenli tekrar etsin"
+    ),
+    recurringFieldsEl,
+    payForm.recurring ? React.createElement("div", { style: { fontSize: 11.5, color: C.muted } }, "Şablon kurulduğu andan itibaren ileriye doğru kayıt üretir — geçmişe gidip önceki dönemler için borç oluşturmaz.") : null
+  ) : null;
+
+  const paymentMethodFieldsEl = payForm.status !== "odendi" ? null : React.createElement("div", {
+    style: { display: "grid", gridTemplateColumns: payForm.paymentMethod === "hesaptan" ? "160px 1fr" : "160px", gap: 10 }
+  },
+    React.createElement("select", { style: inputStyle, value: payForm.paymentMethod, onChange: e => setPayForm({ ...payForm, paymentMethod: e.target.value }) },
+      React.createElement("option", { value: "hesaptan" }, "Hesaptan"),
+      React.createElement("option", { value: "elden" }, "Elden")
+    ),
+    payForm.paymentMethod !== "hesaptan" ? null : (accounts.length === 0
+      ? React.createElement("div", { style: { fontSize: 12, color: C.muted, alignSelf: "center" } }, "Önce Kasa/Bankalar'dan bir hesap ekle.")
+      : React.createElement("select", { style: inputStyle, value: payForm.accountId, onChange: e => setPayForm({ ...payForm, accountId: e.target.value }) },
+          accounts.map(a => React.createElement("option", { key: a.id, value: a.id }, a.name, a.bankName ? ` (${a.bankName})` : ""))
+        )
+    )
+  );
+
+  const payFormEl = !openPayForm ? null : React.createElement("form", {
     onSubmit: submitPay,
-    style: {
-      display: "flex",
-      flexDirection: "column",
-      gap: 10,
-      marginBottom: 16
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "grid",
-      gridTemplateColumns: "130px 130px 130px auto",
-      gap: 10
-    }
-  }, /*#__PURE__*/React.createElement("input", {
-    type: "month",
-    style: inputStyle,
-    value: payForm.month,
-    onChange: e => setPayForm({
-      ...payForm,
-      month: e.target.value
-    })
-  }), /*#__PURE__*/React.createElement("input", {
-    type: "date",
-    style: inputStyle,
-    value: payForm.date,
-    onChange: e => setPayForm({
-      ...payForm,
-      date: e.target.value
-    })
-  }), /*#__PURE__*/React.createElement(TutarInput, {
-    style: inputStyle,
-    placeholder: "Tutar",
-    value: payForm.amount,
-    onChange: e => setPayForm({
-      ...payForm,
-      amount: e.target.value
-    })
-  }), /*#__PURE__*/React.createElement("button", {
-    type: "submit",
-    style: {
-      background: C.red,
-      color: "#fff",
-      border: "none",
-      borderRadius: 6,
-      padding: "0 14px",
-      fontSize: 13,
-      fontWeight: 600,
-      cursor: "pointer"
-    }
-  }, editingPayId ? "Güncelle" : "Öde")), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "grid",
-      gridTemplateColumns: payForm.paymentMethod === "hesaptan" ? "160px 1fr" : "160px",
-      gap: 10
-    }
-  }, /*#__PURE__*/React.createElement("select", {
-    style: inputStyle,
-    value: payForm.paymentMethod,
-    onChange: e => setPayForm({
-      ...payForm,
-      paymentMethod: e.target.value
-    })
-  }, /*#__PURE__*/React.createElement("option", {
-    value: "hesaptan"
-  }, "Hesaptan"), /*#__PURE__*/React.createElement("option", {
-    value: "elden"
-  }, "Elden")), payForm.paymentMethod === "hesaptan" && (accounts.length === 0 ? /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 12,
-      color: C.muted,
-      alignSelf: "center"
-    }
-  }, "Önce Kasa/Bankalar'dan bir hesap ekle.") : /*#__PURE__*/React.createElement("select", {
-    style: inputStyle,
-    value: payForm.accountId,
-    onChange: e => setPayForm({
-      ...payForm,
-      accountId: e.target.value
-    })
-  }, accounts.map(a => /*#__PURE__*/React.createElement("option", {
-    key: a.id,
-    value: a.id
-  }, a.name, a.bankName ? ` (${a.bankName})` : ""))))), /*#__PURE__*/React.createElement("input", {
-    type: "text",
-    style: inputStyle,
-    placeholder: "Not (opsiyonel)",
-    value: payForm.note || "",
-    onChange: e => setPayForm({
-      ...payForm,
-      note: e.target.value
-    })
-  }), /*#__PURE__*/React.createElement(TagPicker, {
-    tags: tags,
-    selected: payForm.tags,
-    onChange: ids => setPayForm({
-      ...payForm,
-      tags: ids
-    }),
-    onCreateTag: addTag
-  })), payments.filter(p => p.employeeId === activeEmp).length === 0 ? /*#__PURE__*/React.createElement(EmptyState, {
-    text: "Bu çalışan için ödeme kaydı yok."
-  }) : /*#__PURE__*/React.createElement("div", null, [...payments].filter(p => p.employeeId === activeEmp).sort((a, b) => new Date(b.date) - new Date(a.date)).map(p => /*#__PURE__*/React.createElement("div", {
-    key: p.id,
-    style: {
-      display: "flex",
-      justifyContent: "space-between",
-      padding: "9px 0",
-      borderBottom: `1px solid ${C.paperDark}`
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 14
-    }
-  }, p.month, " ", /*#__PURE__*/React.createElement("span", {
-    style: {
-      color: C.muted,
-      fontSize: 12
-    }
-  }, "· ödeme: ", fmtDate(p.date)), /*#__PURE__*/React.createElement("span", {
-    style: {
-      marginLeft: 6,
-      fontSize: 11,
-      fontWeight: 600,
-      padding: "2px 8px",
-      borderRadius: 20,
-      background: p.paymentMethod === "elden" ? C.amberSoft : C.greenSoft,
-      color: p.paymentMethod === "elden" ? C.amber : C.green
-    }
-  }, p.paymentMethod === "elden" ? "Elden" : p.accountName ? `Hesaptan · ${p.accountName}` : "Hesaptan"), /*#__PURE__*/React.createElement(TagBadges, {
-    ids: p.tags,
-    tags: tags
-  }), p.note ? /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 11,
-      color: C.muted,
-      marginTop: 2
-    }
-  }, p.note) : null), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "flex",
-      alignItems: "center",
-      gap: 10
-    }
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "ecz-mono",
-    style: {
-      fontWeight: 600,
-      fontSize: 14,
-      color: C.red
-    }
-  }, "−", fmt(p.amount)), /*#__PURE__*/React.createElement("button", {
-    onClick: () => startEditPay(p),
-    title: "Düzenle",
-    style: {
-      background: "none",
-      border: "none",
-      cursor: "pointer",
-      color: C.muted
-    }
-  }, /*#__PURE__*/React.createElement(Pencil, {
-    size: 13
-  })), /*#__PURE__*/React.createElement("button", {
-    onClick: () => removeTx(p.id),
-    title: "Sil",
-    style: {
-      background: "none",
-      border: "none",
-      cursor: "pointer",
-      color: C.muted
-    }
-  }, /*#__PURE__*/React.createElement(Trash2, {
-    size: 13
-  })))))), monthlyBreakdownEl))));
+    className: "fadein",
+    style: { display: "flex", flexDirection: "column", gap: 10, marginBottom: 18, background: C.paper, borderRadius: 10, padding: 14 }
+  },
+    React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(140px,1fr))", gap: 10 } },
+      React.createElement(Field, { label: "Hakediş Tarihi" },
+        React.createElement("input", { type: "date", style: inputStyle, value: payForm.date, onChange: e => setPayForm({ ...payForm, date: e.target.value }) })
+      ),
+      React.createElement(Field, { label: "Ödeneceği Tarih" },
+        React.createElement("input", { type: "date", style: inputStyle, value: payForm.dueDate, onChange: e => setPayForm({ ...payForm, dueDate: e.target.value }) })
+      ),
+      React.createElement(Field, { label: "Toplam Tutar (₺)" },
+        React.createElement(TutarInput, { style: inputStyle, value: payForm.amount, onChange: e => setPayForm({ ...payForm, amount: e.target.value }) })
+      )
+    ),
+    React.createElement(Field, { label: "Ödeme Durumu" },
+      React.createElement("div", { style: { display: "flex", gap: 8 } },
+        ["bekliyor", "odendi"].map(st => React.createElement("button", {
+          key: st,
+          type: "button",
+          onClick: () => setPayForm({ ...payForm, status: st }),
+          style: {
+            flex: 1, padding: "8px 12px", borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: "pointer",
+            border: `1px solid ${payForm.status === st ? C.accent : C.line}`,
+            background: payForm.status === st ? C.accent : C.card,
+            color: payForm.status === st ? "#fff" : C.text
+          }
+        }, st === "odendi" ? "Ödendi" : "Ödenecek"))
+      )
+    ),
+    paymentMethodFieldsEl,
+    recurringToggleEl,
+    React.createElement("button", {
+      type: "submit",
+      style: { alignSelf: "flex-start", background: C.red, color: "#fff", border: "none", borderRadius: 6, padding: "9px 16px", fontSize: 13, fontWeight: 600, cursor: "pointer" }
+    }, editingPayId ? "Güncelle" : "Kaydet")
+  );
+
+  const templatesBlockEl = myTemplates.length === 0 ? null : React.createElement("div", {
+    style: { background: C.paper, borderRadius: 12, padding: 12, marginBottom: 14, display: "flex", flexDirection: "column", gap: 8 }
+  },
+    React.createElement("div", { style: { fontSize: 12, fontWeight: 600, color: C.muted, textTransform: "uppercase", letterSpacing: "0.04em" } }, "Maaş Tekrarlama Şablonları"),
+    myTemplates.map(rt => React.createElement("div", {
+      key: rt.id,
+      style: { display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 13, gap: 10 }
+    },
+      React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, color: C.text } },
+        React.createElement(RotateCcw, { size: 13, color: C.muted }),
+        React.createElement("span", { style: { color: C.muted } }, fmt(rt.amount), " · ", rt.frequency.type === "monthly" ? "Aylık" : `${rt.frequency.intervalDays} günde bir`, " · sıradaki: ", fmtDate(rt.nextDueDate))
+      ),
+      React.createElement("button", {
+        onClick: () => removeRecurringTemplate(rt.id),
+        title: "Şablonu sil",
+        style: { background: "none", border: "none", cursor: "pointer", color: C.muted }
+      }, React.createElement(Trash2, { size: 14 }))
+    ))
+  );
+
+  const kayitRows = empKayitlari.map(t => React.createElement(React.Fragment, { key: t.id },
+    React.createElement("tr", { style: { borderTop: `1px solid ${C.paperDark}` } },
+      React.createElement("td", { style: tdStyle }, fmtDate(t.date)),
+      React.createElement("td", { style: tdStyle }, t.dueDate && t.dueDate !== t.date ? fmtDate(t.dueDate) : "—"),
+      React.createElement("td", { className: "ecz-mono", style: { padding: "10px 16px", fontWeight: 600 } },
+        fmt(t.amount), " ",
+        t.recurringTemplateId ? React.createElement(RotateCcw, { size: 12, color: C.muted, style: { marginLeft: 4, verticalAlign: "middle" } }) : null
+      ),
+      React.createElement("td", { style: { padding: "10px 16px" } },
+        React.createElement(PaymentStatusCell, { t: t, isExpanded: expandedId === t.id, onToggle: () => setExpandedId(expandedId === t.id ? null : t.id) })
+      ),
+      React.createElement("td", { style: { padding: "10px 16px", textAlign: "right", whiteSpace: "nowrap" } },
+        React.createElement("button", {
+          onClick: () => startEditPay(t), title: "Düzenle",
+          style: { background: "none", border: "none", cursor: "pointer", color: C.muted, marginRight: 8 }
+        }, React.createElement(Pencil, { size: 13 })),
+        React.createElement("button", {
+          onClick: () => removeTx(t.id), title: "Sil",
+          style: { background: "none", border: "none", cursor: "pointer", color: C.muted }
+        }, React.createElement(Trash2, { size: 13 }))
+      )
+    ),
+    expandedId === t.id ? React.createElement(PaymentHistoryDetail, { t: t, editTx: editTx, accounts: accounts, colSpan: 5 }) : null
+  ));
+
+  const kayitTableEl = empKayitlari.length === 0 ? React.createElement(EmptyState, { text: "Bu çalışan için maaş/prim kaydı yok." }) : React.createElement("table", {
+    style: { width: "100%", borderCollapse: "collapse", fontSize: 14 }
+  },
+    React.createElement("thead", null,
+      React.createElement("tr", { style: { background: C.paperDark, textAlign: "left" } },
+        ["Hakediş Tarihi", "Vade", "Tutar", "Durum", ""].map(h => React.createElement("th", {
+          key: h,
+          style: { padding: "10px 16px", fontSize: 12, textTransform: "uppercase", letterSpacing: "0.04em", color: C.muted, fontWeight: 600 }
+        }, h))
+      )
+    ),
+    React.createElement("tbody", null, kayitRows)
+  );
+
+  const detailPanelInnerEl = !activeEmp ? React.createElement(EmptyState, { text: "Maaş/prim kaydı görmek/eklemek için soldan bir çalışan seç." }) : React.createElement(React.Fragment, null,
+    React.createElement("h3", { className: "ecz-display", style: { fontSize: 15, fontWeight: 600, margin: "0 0 12px", color: C.ink } }, activeEmpObj?.name, " — Maaş / Prim Kayıtları"),
+    summaryStripEl,
+    togglePayFormButtonEl,
+    payFormEl,
+    templatesBlockEl,
+    kayitTableEl
+  );
+
+  const detailPanelEl = React.createElement("div", {
+    style: { background: C.card, borderRadius: 18, padding: 18, border: "none", boxShadow: "0 1px 2px rgba(20,20,16,0.03), 0 10px 26px rgba(20,20,16,0.06)" }
+  }, detailPanelInnerEl);
+
+  const bodyEl = employees.length === 0 ? React.createElement("div", {
+    style: { background: C.card, borderRadius: 18, border: "none", boxShadow: "0 1px 2px rgba(20,20,16,0.03), 0 10px 26px rgba(20,20,16,0.06)" }
+  }, React.createElement(EmptyState, { text: "Henüz çalışan eklenmedi." })) : React.createElement("div", {
+    style: { display: "grid", gridTemplateColumns: "minmax(230px,300px) 1fr", gap: 18 }
+  }, employeeListEl, detailPanelEl);
+
+  return React.createElement("div", { className: "fadein", style: { display: "flex", flexDirection: "column", gap: 16 } },
+    kpiRowEl,
+    addEmpButtonEl,
+    empFormEl,
+    bodyEl
+  );
 }
 function GiderlerView({
   transactions,
@@ -5255,7 +5023,10 @@ function GiderlerView({
     removeTx: removeTx,
     tags: tags,
     addTag: addTag,
-    accounts: accounts
+    accounts: accounts,
+    recurringTemplates: recurringTemplates,
+    addRecurringTemplate: addRecurringTemplate,
+    removeRecurringTemplate: removeRecurringTemplate
   }));
 }
 
@@ -9544,21 +9315,41 @@ function App() {
         let next = tpl.nextDueDate;
         let guard = 0;
         while (next <= todayStr() && guard < 24) {
-          genTx.push({
-            id: uid(),
-            type: tpl.kind,
-            [tpl.kind === "gider" ? "giderTuru" : "gelirTuru"]: "genel",
-            category: tpl.category,
-            description: tpl.description,
-            amount: Number(tpl.amount),
-            date: next,
-            tags: tpl.tags || [],
-            paymentMethod: tpl.paymentMethod,
-            accountId: tpl.accountId,
-            accountName: acc.find(a => a.id === tpl.accountId)?.name || null,
-            status: "bekliyor",
-            recurringTemplateId: tpl.id
-          });
+          if (tpl.kind === "maas") {
+            /* Maaş tekrarlama şablonu: Paraşüt'teki gibi SADECE kurulduğu
+               andan itibaren ileri yönde kayıt üretir (tpl.nextDueDate hep
+               ileri gider) — çalışanın işe giriş tarihine bakılmaz, geçmişe
+               gidip eski dönemler için borç icat edilmez. */
+            genTx.push({
+              id: uid(),
+              type: "gider",
+              giderTuru: "maas",
+              employeeId: tpl.employeeId,
+              category: "Çalışan Maaşı",
+              description: `${emp.find(e => e.id === tpl.employeeId)?.name || ""} — ${next}`,
+              amount: Number(tpl.amount),
+              date: next,
+              dueDate: next,
+              payments: [],
+              recurringTemplateId: tpl.id
+            });
+          } else {
+            genTx.push({
+              id: uid(),
+              type: tpl.kind,
+              [tpl.kind === "gider" ? "giderTuru" : "gelirTuru"]: "genel",
+              category: tpl.category,
+              description: tpl.description,
+              amount: Number(tpl.amount),
+              date: next,
+              tags: tpl.tags || [],
+              paymentMethod: tpl.paymentMethod,
+              accountId: tpl.accountId,
+              accountName: acc.find(a => a.id === tpl.accountId)?.name || null,
+              status: "bekliyor",
+              recurringTemplateId: tpl.id
+            });
+          }
           next = nextRecurringDate(next, tpl.frequency);
           guard++;
         }
@@ -9594,7 +9385,61 @@ function App() {
         };
       });
       if (migrated) saveKey("ecz-transactions", migratedTx);
-      setTransactions(migrated ? migratedTx : finalTx);
+      /* Tek seferlik göç: eski "maas" kayıtları çalışanın o ayda GERÇEKTEN
+         ödediği tutarları temsil ediyordu (aylık maaşın işe giriş tarihinden
+         bu yana her ay otomatik borç sayıldığı eski modelde). Paraşüt'teki
+         gibi yeni modelde hiçbir ay otomatik borç sayılmaz — bu yüzden her
+         eski kayıt, çalışan+ay bazında gruplanıp TEK bir "tamamen ödenmiş"
+         maaş/prim kaydına çevrilir (tutar = o ayki ödemelerin toplamı,
+         payments[] = orijinal ödemeler). Geçmiş veride hiçbir şey kaybolmaz;
+         sadece artık ileriye dönük borç/kalan sadece açıkça oluşturulan
+         (elle ya da tekrarlama şablonuyla) kayıtlardan hesaplanır. */
+      const preMaasTx = migrated ? migratedTx : finalTx;
+      let maasMigrated = false;
+      const maasGroups = {};
+      const nonMaasTx = [];
+      preMaasTx.forEach(tx => {
+        const isOldMaas = tx.type === "gider" && tx.giderTuru === "maas" && !Array.isArray(tx.payments);
+        if (!isOldMaas) {
+          nonMaasTx.push(tx);
+          return;
+        }
+        maasMigrated = true;
+        const key = `${tx.employeeId}__${tx.month || (tx.date || "").slice(0, 7)}`;
+        if (!maasGroups[key]) {
+          maasGroups[key] = {
+            id: uid(),
+            type: "gider",
+            giderTuru: "maas",
+            employeeId: tx.employeeId,
+            category: tx.category || "Çalışan Maaşı",
+            description: tx.description || "",
+            date: tx.date,
+            dueDate: tx.date,
+            payments: []
+          };
+        }
+        const grp = maasGroups[key];
+        if (tx.date > grp.date) {
+          grp.date = tx.date;
+          grp.dueDate = tx.date;
+        }
+        grp.payments.push({
+          id: tx.id,
+          date: tx.date,
+          amount: Number(tx.amount || 0),
+          paymentMethod: tx.paymentMethod || "hesaptan",
+          accountId: tx.accountId || null,
+          accountName: tx.accountName || null
+        });
+      });
+      const maasKayitTx = Object.values(maasGroups).map(grp => ({
+        ...grp,
+        amount: grp.payments.reduce((s, p) => s + Number(p.amount || 0), 0)
+      }));
+      const fullyMigratedTx = maasMigrated ? [...nonMaasTx, ...maasKayitTx] : preMaasTx;
+      if (maasMigrated) saveKey("ecz-transactions", fullyMigratedTx);
+      setTransactions(fullyMigratedTx);
       setSuppliers(s);
       setSupplierTx(st);
       setPrescriptions(p);
@@ -10563,26 +10408,17 @@ function App() {
       });
     }
 
-    // Çalışan maaşları (bu ay dahil, işe giriş tarihinden bu yana biriken TÜM
-    // ödenmemiş/kısmi ödenmiş aylar — sadece bu ayı değil, geçmiş atlanan
-    // ayları da kapsar, çünkü her ay ayrı bir kayıt olarak birikiyor)
-    const thisMonth = todayD.slice(0, 7);
-    const maasPayments = transactions.filter(t => t.type === "gider" && t.giderTuru === "maas");
-    let employeesWithArrears = 0;
-    let totalArrears = 0;
-    employees.forEach(e => {
-      const empPays = maasPayments.filter(p => p.employeeId === e.id);
-      const dueMonths = monthsBetweenInclusive(e.hireDate ? e.hireDate.slice(0, 7) : thisMonth, thisMonth);
-      let empArrears = 0;
-      dueMonths.forEach(m => {
-        const paidM = empPays.filter(p => p.month === m).reduce((s, p) => s + Number(p.amount), 0);
-        empArrears += Math.max(0, Number(e.salary || 0) - paidM);
-      });
-      if (empArrears > 0) {
-        employeesWithArrears++;
-        totalArrears += empArrears;
-      }
+    // Çalışan maaşları — sadece GERÇEKTEN oluşturulmuş (elle ya da tekrarlama
+    // şablonuyla) maaş/prim kayıtlarının kalan tutarı hesaba katılır; işe
+    // giriş tarihine bakılarak geçmişe dönük hiçbir ay icat edilmez.
+    const maasKayitlariAll = transactions.filter(t => t.type === "gider" && t.giderTuru === "maas");
+    const empArrearsMap = {};
+    maasKayitlariAll.forEach(t => {
+      const kalan = kalanOf(t);
+      if (kalan > 0) empArrearsMap[t.employeeId] = (empArrearsMap[t.employeeId] || 0) + kalan;
     });
+    const employeesWithArrears = Object.keys(empArrearsMap).length;
+    const totalArrears = Object.values(empArrearsMap).reduce((s, v) => s + v, 0);
     if (employeesWithArrears) list.push({
       id: "maas-eksik",
       tab: "giderler",

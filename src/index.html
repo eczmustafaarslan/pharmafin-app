@@ -7865,10 +7865,79 @@ const IZIN_TURLERI = [{
   key: "diger",
   label: "Diğer"
 }];
+/* Kullanıcının 2026-09-02/03 isteği: "kanunda yıllık izinde geçen bütün
+   kuralları izin listemizde görmek istiyorum". Otomatik hesaplanabilen
+   kurallar (kıdem bazlı gün hakkı, hafta tatili/resmi tatil düşümü, 3 parça
+   uyarısı) uygulamada gerçekten uygulanıyor; aşağıdaki listedeki diğerleri
+   (yol izni, peşin ödeme, kıdem hesabı detayları, kullanılmayan izin ücreti)
+   bu uygulamanın kapsamı dışında kalan HR/muhasebe süreçleri olduğundan
+   sadece bilgi amaçlı gösteriliyor. */
+const IZIN_KANUN_MADDELERI = ["Madde 53: Kıdeme göre yıllık izin hakkı — 1-5 yıl arası (5 dahil): 14 gün · 5-15 yıl arası: 20 gün · 15 yıl ve üzeri: 26 gün. 1 yılını doldurmamış çalışan henüz hak kazanmamıştır (aşağıda otomatik hesaplanır).", "Madde 53: 18 yaşından küçük ve 50 yaşından büyük çalışanlara verilecek yıllık izin 20 günden az olamaz (bilgi notu — çalışan kaydında doğum tarihi tutulmadığından bu uygulamada otomatik hesaplanmıyor, elle takip edilmeli).", "Madde 55: İşçinin hastalık/kaza, doğum izni, kısa süreli zorlayıcı sebep tatilleri gibi bazı çalışmadığı süreler kıdem hesabında çalışılmış gibi sayılır (bilgi notu — bu uygulamada kıdem sadece işe giriş tarihinden hesaplanıyor).", "Madde 56/5: İzin süresine rastlayan hafta tatili (bu eczanede Pazar) ile resmi/dini bayram günleri izin süresinden sayılmaz — Yıllık İzin gün sayımına bu uygulamada otomatik yansıtılıyor.", "Madde 56/3: Taraflar anlaşırsa yıllık izin en fazla 3 parçaya bölünebilir; bölümlerden biri 10 günden az olamaz (bir çalışanın bir yılda 3'ten fazla yıllık izin kaydı varsa yukarıda uyarı rozeti gösterilir).", "Madde 56/son: İzni işyerinin bulunduğu yerden başka bir yerde geçirecek çalışana, istemi halinde en az 4 gün ücretsiz (işveren isterse ücretli) yol izni verilebilir (bilgi notu — bu uygulamada ayrıca takip edilmiyor).", "Madde 57: İzin ücreti, çalışanın izne başlamasından önce peşin veya avans olarak ödenmelidir (bilgi notu — ödeme takibi Gelir/Gider > Çalışan Maaşları bölümünde ayrıca yapılmalı).", "Madde 59: İş sözleşmesi herhangi bir nedenle sona erdiğinde, kullanılmamış yıllık izin günlerinin ücreti sözleşmenin sona erdiği tarihteki ücret üzerinden ödenir (bilgi notu — bu uygulamada ayrıca hesaplanmıyor)."];
 function dayCount(start, end) {
   const s = new Date(start),
     e = new Date(end);
   return Math.max(1, Math.round((e - s) / 86400000) + 1);
+}
+
+/* 4857 sayılı İş Kanunu Madde 56/5: "Yıllık ücretli izin süresine rastlayan
+   ulusal bayram, hafta tatili ve genel tatil günleri izin süresinden sayılmaz."
+   Bu kural SADECE "Yıllık İzin" türü için uygulanır — raporlu (hekim raporundaki
+   takvim günü esastır), doğum izni (Madde 74, hafta bazlı kesintisiz hesaplanır)
+   ve diğer izin türlerinde kanunda ayrı/farklı hükümler olduğundan bu düşüm
+   uygulanmaz, onlar hâlâ düz dayCount kullanır.
+
+   Hafta tatili: bu eczanede Pazar günü kabul edildi (kullanıcı onayı, 2026-09-03).
+   Resmi/dini tatiller: sabit tarihli 7 resmi tatil + her yıl Hicri takvime göre
+   kayan Ramazan/Kurban Bayramı (arefe günü dahil tam gün sayıldı — çoğu işyeri
+   pratiği budur, bilinçli bir basitleştirme). Tarihler 2026-2029 için doğrulanmış
+   kaynaklardan (izintakvimi.com, Diyanet vakithesaplama) girildi. 2030 ve sonrası
+   için, o yıla yaklaşınca RESMI_TATILLER tablosunun güncellenmesi gerekir — dini
+   bayram tarihleri resmi olarak ancak birkaç yıl öncesinden netleşir. 28 Ekim
+   öğleden sonrası (kamuda yarım gün) kasıtlı olarak dahil edilmedi, sadece tam
+   günler (29 Ekim) sayılır. */
+const RESMI_TATILLER = {
+  2026: [["2026-01-01", "Yılbaşı"], ["2026-03-19", "Ramazan Bayramı Arefesi"], ["2026-03-20", "Ramazan Bayramı 1. Gün"], ["2026-03-21", "Ramazan Bayramı 2. Gün"], ["2026-03-22", "Ramazan Bayramı 3. Gün"], ["2026-04-23", "23 Nisan Ulusal Egemenlik ve Çocuk Bayramı"], ["2026-05-01", "1 Mayıs Emek ve Dayanışma Günü"], ["2026-05-19", "19 Mayıs Atatürk'ü Anma, Gençlik ve Spor Bayramı"], ["2026-05-26", "Kurban Bayramı Arefesi"], ["2026-05-27", "Kurban Bayramı 1. Gün"], ["2026-05-28", "Kurban Bayramı 2. Gün"], ["2026-05-29", "Kurban Bayramı 3. Gün"], ["2026-05-30", "Kurban Bayramı 4. Gün"], ["2026-07-15", "15 Temmuz Demokrasi ve Milli Birlik Günü"], ["2026-08-30", "30 Ağustos Zafer Bayramı"], ["2026-10-29", "29 Ekim Cumhuriyet Bayramı"]],
+  2027: [["2027-01-01", "Yılbaşı"], ["2027-03-08", "Ramazan Bayramı Arefesi"], ["2027-03-09", "Ramazan Bayramı 1. Gün"], ["2027-03-10", "Ramazan Bayramı 2. Gün"], ["2027-03-11", "Ramazan Bayramı 3. Gün"], ["2027-04-23", "23 Nisan Ulusal Egemenlik ve Çocuk Bayramı"], ["2027-05-01", "1 Mayıs Emek ve Dayanışma Günü"], ["2027-05-15", "Kurban Bayramı Arefesi"], ["2027-05-16", "Kurban Bayramı 1. Gün"], ["2027-05-17", "Kurban Bayramı 2. Gün"], ["2027-05-18", "Kurban Bayramı 3. Gün"], ["2027-05-19", "Kurban Bayramı 4. Gün / 19 Mayıs Gençlik ve Spor Bayramı"], ["2027-07-15", "15 Temmuz Demokrasi ve Milli Birlik Günü"], ["2027-08-30", "30 Ağustos Zafer Bayramı"], ["2027-10-29", "29 Ekim Cumhuriyet Bayramı"]],
+  2028: [["2028-01-01", "Yılbaşı"], ["2028-02-25", "Ramazan Bayramı Arefesi"], ["2028-02-26", "Ramazan Bayramı 1. Gün"], ["2028-02-27", "Ramazan Bayramı 2. Gün"], ["2028-02-28", "Ramazan Bayramı 3. Gün"], ["2028-04-23", "23 Nisan Ulusal Egemenlik ve Çocuk Bayramı"], ["2028-05-01", "1 Mayıs Emek ve Dayanışma Günü"], ["2028-05-04", "Kurban Bayramı Arefesi"], ["2028-05-05", "Kurban Bayramı 1. Gün"], ["2028-05-06", "Kurban Bayramı 2. Gün"], ["2028-05-07", "Kurban Bayramı 3. Gün"], ["2028-05-08", "Kurban Bayramı 4. Gün"], ["2028-05-19", "19 Mayıs Atatürk'ü Anma, Gençlik ve Spor Bayramı"], ["2028-07-15", "15 Temmuz Demokrasi ve Milli Birlik Günü"], ["2028-08-30", "30 Ağustos Zafer Bayramı"], ["2028-10-29", "29 Ekim Cumhuriyet Bayramı"]],
+  2029: [["2029-01-01", "Yılbaşı"], ["2029-02-13", "Ramazan Bayramı Arefesi"], ["2029-02-14", "Ramazan Bayramı 1. Gün"], ["2029-02-15", "Ramazan Bayramı 2. Gün"], ["2029-02-16", "Ramazan Bayramı 3. Gün"], ["2029-04-23", "Kurban Bayramı Arefesi / 23 Nisan Ulusal Egemenlik ve Çocuk Bayramı"], ["2029-04-24", "Kurban Bayramı 1. Gün"], ["2029-04-25", "Kurban Bayramı 2. Gün"], ["2029-04-26", "Kurban Bayramı 3. Gün"], ["2029-04-27", "Kurban Bayramı 4. Gün"], ["2029-05-01", "1 Mayıs Emek ve Dayanışma Günü"], ["2029-05-19", "19 Mayıs Atatürk'ü Anma, Gençlik ve Spor Bayramı"], ["2029-07-15", "15 Temmuz Demokrasi ve Milli Birlik Günü"], ["2029-08-30", "30 Ağustos Zafer Bayramı"], ["2029-10-29", "29 Ekim Cumhuriyet Bayramı"]]
+};
+const RESMI_TATIL_MAP = {};
+Object.values(RESMI_TATILLER).forEach(yl => yl.forEach(([d, label]) => {
+  RESMI_TATIL_MAP[d] = label;
+}));
+function resmiTatilAdi(dateStr) {
+  return RESMI_TATIL_MAP[dateStr] || null;
+}
+function isHaftaTatili(dateStr) {
+  return parseLocalDate(dateStr).getDay() === 0; // Pazar
+}
+function yillikIzinNetGun(start, end) {
+  const s = parseLocalDate(start),
+    e = parseLocalDate(end);
+  if (isNaN(s.getTime()) || isNaN(e.getTime()) || e < s) return {
+    toplam: 0,
+    haftaTatili: 0,
+    resmiTatil: 0,
+    net: 0
+  };
+  let toplam = 0,
+    haftaTatili = 0,
+    resmiTatil = 0;
+  for (let d = new Date(s); d <= e; d.setDate(d.getDate() + 1)) {
+    toplam++;
+    const ds = ymd(d);
+    if (isHaftaTatili(ds)) {
+      haftaTatili++;
+    } else if (RESMI_TATIL_MAP[ds]) {
+      resmiTatil++;
+    }
+  }
+  return {
+    toplam,
+    haftaTatili,
+    resmiTatil,
+    net: Math.max(0, toplam - haftaTatili - resmiTatil)
+  };
 }
 
 /* ---------------- YETKİLENDİRME SİSTEMİ ----------------
@@ -8828,7 +8897,11 @@ function IzinlerView({
   const sorted = [...leaves].sort((a, b) => new Date(b.startDate) - new Date(a.startDate));
   const activeToday = leaves.filter(l => l.startDate <= todayD && l.endDate >= todayD);
   const thisYear = todayD.slice(0, 4);
-  const yillikGunThisYear = leaves.filter(l => l.type === "yillik" && l.startDate.slice(0, 4) === thisYear).reduce((s, l) => s + dayCount(l.startDate, l.endDate), 0);
+  /* Madde 56/5: Yıllık İzin gün sayımında hafta tatili + resmi/dini tatil
+     hariç tutulur; diğer izin türlerinde düz takvim günü sayılır. */
+  const izinGunSayisi = l => l.type === "yillik" ? yillikIzinNetGun(l.startDate, l.endDate).net : dayCount(l.startDate, l.endDate);
+  const yillikGunThisYear = leaves.filter(l => l.type === "yillik" && l.startDate.slice(0, 4) === thisYear).reduce((s, l) => s + izinGunSayisi(l), 0);
+  const formIzinHesap = form.type === "yillik" ? yillikIzinNetGun(form.startDate, form.endDate) : null;
   const byEmployee = useMemo(() => {
     const map = {};
     employees.forEach(e => {
@@ -8836,7 +8909,8 @@ function IzinlerView({
         yillik: 0,
         raporlu: 0,
         diger: 0,
-        yillikBuYil: 0
+        yillikBuYil: 0,
+        yillikKayitBuYil: 0
       };
     });
     leaves.forEach(l => {
@@ -8845,14 +8919,17 @@ function IzinlerView({
         yillik: 0,
         raporlu: 0,
         diger: 0,
-        yillikBuYil: 0
+        yillikBuYil: 0,
+        yillikKayitBuYil: 0
       };
-      map[key][l.type] = (map[key][l.type] || 0) + dayCount(l.startDate, l.endDate);
+      map[key][l.type] = (map[key][l.type] || 0) + izinGunSayisi(l);
       if (l.type === "yillik" && l.startDate.slice(0, 4) === thisYear) {
-        map[key].yillikBuYil += dayCount(l.startDate, l.endDate);
+        map[key].yillikBuYil += izinGunSayisi(l);
+        map[key].yillikKayitBuYil += 1;
       }
     });
     return Object.entries(map);
+    // eslint-disable-next-line
   }, [leaves, employees, thisYear]);
   return /*#__PURE__*/React.createElement("div", {
     className: "fadein",
@@ -9039,11 +9116,19 @@ function IzinlerView({
       fontSize: 13,
       color: C.muted
     }
-  }, "Toplam ", /*#__PURE__*/React.createElement("b", {
+  }, form.type === "yillik" && formIzinHesap ? /*#__PURE__*/React.createElement(React.Fragment, null, "Takvim aralığı ", /*#__PURE__*/React.createElement("b", {
     style: {
       color: C.ink
     }
-  }, dayCount(form.startDate, form.endDate), " gün")), form.type === "dogum" && /*#__PURE__*/React.createElement("p", {
+  }, formIzinHesap.toplam, " gün"), formIzinHesap.haftaTatili + formIzinHesap.resmiTatil > 0 ? ` (${formIzinHesap.haftaTatili} hafta tatili + ${formIzinHesap.resmiTatil} resmi tatil hariç) ` : " ", "→ izinden düşülecek: ", /*#__PURE__*/React.createElement("b", {
+    style: {
+      color: C.green
+    }
+  }, formIzinHesap.net, " gün")) : /*#__PURE__*/React.createElement(React.Fragment, null, "Toplam ", /*#__PURE__*/React.createElement("b", {
+    style: {
+      color: C.ink
+    }
+  }, dayCount(form.startDate, form.endDate), " gün"))), form.type === "dogum" && /*#__PURE__*/React.createElement("p", {
     style: {
       fontSize: 11,
       color: C.muted,
@@ -9134,7 +9219,19 @@ function IzinlerView({
         borderRadius: 20,
         padding: "2px 9px"
       }
-    }, "🤰 Doğum İzninde"), hak ? /*#__PURE__*/React.createElement("div", {
+    }, "🤰 Doğum İzninde"), s.yillikKayitBuYil > 3 && /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: "inline-block",
+        marginTop: 4,
+        fontSize: 11,
+        fontWeight: 700,
+        color: C.red,
+        background: C.redSoft,
+        borderRadius: 20,
+        padding: "2px 9px"
+      },
+      title: "4857 sayılı İş Kanunu Madde 56/3: Taraflar anlaşırsa yıllık izin en fazla 3 parçaya bölünebilir."
+    }, `⚠️ ${thisYear}: ${s.yillikKayitBuYil} parçaya bölünmüş (kanunen en fazla 3)`), hak ? /*#__PURE__*/React.createElement("div", {
       style: {
         fontSize: 12,
         color: C.muted,
@@ -9162,7 +9259,35 @@ function IzinlerView({
       color: C.muted,
       margin: "10px 0 0"
     }
-  }, "4857 sayılı İş Kanunu Madde 53: 1-5 yıl arası (5 dahil) 14 gün · 5-15 yıl arası 20 gün · 15 yıl ve üzeri 26 gün. 18 yaş altı ve 50 yaş üstü çalışanlar en az 20 gün izin hakkına sahiptir.")), /*#__PURE__*/React.createElement("div", {
+  }, "Kıdem hesabı ve gün hakları için aşağıdaki kanuni kurallar listesine bakınız.")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: C.card,
+      borderRadius: 18,
+      padding: 18,
+      border: "none",
+      boxShadow: "0 1px 2px rgba(20,20,16,0.03), 0 10px 26px rgba(20,20,16,0.06)"
+    }
+  }, /*#__PURE__*/React.createElement("h3", {
+    className: "ecz-display",
+    style: {
+      fontSize: 15,
+      fontWeight: 600,
+      margin: "0 0 10px",
+      color: C.ink
+    }
+  }, "4857 Sayılı İş Kanunu — Yıllık İzin Kuralları"), /*#__PURE__*/React.createElement("ul", {
+    style: {
+      margin: 0,
+      paddingLeft: 18,
+      display: "flex",
+      flexDirection: "column",
+      gap: 6,
+      fontSize: 12,
+      color: C.muted
+    }
+  }, IZIN_KANUN_MADDELERI.map((madde, i) => /*#__PURE__*/React.createElement("li", {
+    key: i
+  }, madde)))), /*#__PURE__*/React.createElement("div", {
     style: {
       background: C.card,
       borderRadius: 18,
@@ -9196,6 +9321,8 @@ function IzinlerView({
   }, h)))), /*#__PURE__*/React.createElement("tbody", null, sorted.map(l => {
     const isNow = l.startDate <= todayD && l.endDate >= todayD;
     const typeInfo = IZIN_TURLERI.find(t => t.key === l.type);
+    const yillikHesap = l.type === "yillik" ? yillikIzinNetGun(l.startDate, l.endDate) : null;
+    const gunTitle = yillikHesap && yillikHesap.haftaTatili + yillikHesap.resmiTatil > 0 ? `Takvim: ${yillikHesap.toplam} gün — ${yillikHesap.haftaTatili} hafta tatili + ${yillikHesap.resmiTatil} resmi tatil hariç tutuldu` : undefined;
     return /*#__PURE__*/React.createElement("tr", {
       key: l.id,
       style: {
@@ -9232,11 +9359,12 @@ function IzinlerView({
       }
     }, fmtDate(l.endDate)), /*#__PURE__*/React.createElement("td", {
       className: "ecz-mono",
+      title: gunTitle,
       style: {
         padding: "10px 16px",
         fontWeight: 600
       }
-    }, dayCount(l.startDate, l.endDate)), /*#__PURE__*/React.createElement("td", {
+    }, izinGunSayisi(l)), /*#__PURE__*/React.createElement("td", {
       style: {
         padding: "10px 16px",
         color: C.muted

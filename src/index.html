@@ -8902,6 +8902,7 @@ function IzinlerView({
   const izinGunSayisi = l => l.type === "yillik" ? yillikIzinNetGun(l.startDate, l.endDate).net : dayCount(l.startDate, l.endDate);
   const yillikGunThisYear = leaves.filter(l => l.type === "yillik" && l.startDate.slice(0, 4) === thisYear).reduce((s, l) => s + izinGunSayisi(l), 0);
   const formIzinHesap = form.type === "yillik" ? yillikIzinNetGun(form.startDate, form.endDate) : null;
+  const iseBaslamaTarihi = l => l && l.endDate ? addDaysStr(l.endDate, 1) : null;
   const byEmployee = useMemo(() => {
     const map = {};
     employees.forEach(e => {
@@ -9091,7 +9092,7 @@ function IzinlerView({
       startDate: e.target.value
     })
   })), /*#__PURE__*/React.createElement(Field, {
-    label: form.type === "dogum" ? "Bitiş Tarihi (otomatik)" : "Bitiş Tarihi"
+    label: form.type === "dogum" ? "Bitiş Tarihi (otomatik)" : "Son İzin Günü (dahil)"
   }, /*#__PURE__*/React.createElement("input", {
     type: "date",
     style: inputStyle,
@@ -9128,7 +9129,16 @@ function IzinlerView({
     style: {
       color: C.ink
     }
-  }, dayCount(form.startDate, form.endDate), " gün"))), form.type === "dogum" && /*#__PURE__*/React.createElement("p", {
+  }, dayCount(form.startDate, form.endDate), " gün"))), form.endDate && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: C.muted
+    }
+  }, "İşe başlama tarihi (bir sonraki gün): ", /*#__PURE__*/React.createElement("b", {
+    style: {
+      color: C.ink
+    }
+  }, fmtDate(iseBaslamaTarihi(form)))), form.type === "dogum" && /*#__PURE__*/React.createElement("p", {
     style: {
       fontSize: 11,
       color: C.muted,
@@ -9357,7 +9367,12 @@ function IzinlerView({
         padding: "10px 16px",
         color: C.muted
       }
-    }, fmtDate(l.endDate)), /*#__PURE__*/React.createElement("td", {
+    }, /*#__PURE__*/React.createElement("div", null, fmtDate(l.endDate)), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 11,
+        opacity: 0.75
+      }
+    }, "işe başı: ", fmtDate(iseBaslamaTarihi(l)))), /*#__PURE__*/React.createElement("td", {
       className: "ecz-mono",
       title: gunTitle,
       style: {

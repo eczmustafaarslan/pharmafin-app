@@ -8831,6 +8831,7 @@ function IzinlerView({
 }) {
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
+  const [kanunPaneliAcik, setKanunPaneliAcik] = useState(false);
   const todayD = todayStr();
   const [form, setForm] = useState({
     employeeId: employees[0]?.id || "",
@@ -9279,13 +9280,23 @@ function IzinlerView({
     }
   }, /*#__PURE__*/React.createElement("h3", {
     className: "ecz-display",
+    onClick: () => setKanunPaneliAcik(a => !a),
     style: {
       fontSize: 15,
       fontWeight: 600,
-      margin: "0 0 10px",
-      color: C.ink
+      margin: kanunPaneliAcik ? "0 0 10px" : 0,
+      color: C.ink,
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "space-between",
+      cursor: "pointer",
+      userSelect: "none"
     }
-  }, "4857 Sayılı İş Kanunu — Yıllık İzin Kuralları"), /*#__PURE__*/React.createElement("ul", {
+  }, "4857 Sayılı İş Kanunu — Yıllık İzin Kuralları", kanunPaneliAcik ? /*#__PURE__*/React.createElement(ChevronUp, {
+    size: 16
+  }) : /*#__PURE__*/React.createElement(ChevronDown, {
+    size: 16
+  })), kanunPaneliAcik && /*#__PURE__*/React.createElement("ul", {
     style: {
       margin: 0,
       paddingLeft: 18,

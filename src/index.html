@@ -954,14 +954,20 @@ function monthLabelLong(monthStr) {
 }
 /* "YYYY-MM-DD" bir tarihe N ay ekler, ay taşmalarında günü o ayın son gününe
    sabitler (örn. 31 Ocak + 1 ay -> 28/29 Şubat). Tekrarlama şablonlarının
-   "aylık" sıklığı için kullanılır. */
-function addMonthsClamped(dateStr, months) {
+   "aylık" sıklığı için kullanılır. `anchorDay` verilirse (şablonun ASIL
+   kurulduğu gündeki gün numarası), hedef ayın günü HER ZAMAN bu sabit
+   günden hesaplanır — `d.getDate()`'ten değil. Aksi halde (anchorDay
+   verilmezse) bir kısa aydan geçince gün küçülür (31->28) ve önceki
+   yürütmede olduğu gibi bir daha asla 30/31'e geri dönemez; anchorDay ile
+   her ay kendi asıl gününe (mümkünse) döner. */
+function addMonthsClamped(dateStr, months, anchorDay) {
   const d = parseLocalDate(dateStr);
   const totalMonth = d.getMonth() + Number(months);
   const targetYear = d.getFullYear() + Math.floor(totalMonth / 12);
   const targetMonth = ((totalMonth % 12) + 12) % 12;
   const lastDay = new Date(targetYear, targetMonth + 1, 0).getDate();
-  const day = Math.min(d.getDate(), lastDay);
+  const wantedDay = Number(anchorDay) > 0 ? Number(anchorDay) : d.getDate();
+  const day = Math.min(wantedDay, lastDay);
   return ymd(new Date(targetYear, targetMonth, day));
 }
 function addDaysStr(dateStr, days) {
@@ -969,12 +975,14 @@ function addDaysStr(dateStr, days) {
   d.setDate(d.getDate() + Number(days));
   return ymd(d);
 }
-/* Bir tekrarlama şablonunun bir sonraki vade tarihini hesaplar. */
-function nextRecurringDate(dateStr, frequency) {
+/* Bir tekrarlama şablonunun bir sonraki vade tarihini hesaplar. `anchorDay`
+   şablonun asıl kurulduğu gündeki sabit gün numarasıdır (bkz. addMonthsClamped
+   yorumu) — aylık sıklıkta her defasında bu sabit günden hesaplanır. */
+function nextRecurringDate(dateStr, frequency, anchorDay) {
   if (frequency && frequency.type === "custom") {
     return addDaysStr(dateStr, Math.max(1, Number(frequency.intervalDays) || 30));
   }
-  return addMonthsClamped(dateStr, 1);
+  return addMonthsClamped(dateStr, 1, anchorDay);
 }
 async function loadKey(key, fallback) {
   try {
@@ -2241,8 +2249,25 @@ function HesaplarView({
     });
     setOpenTxForm(true);
   };
+  /* Hesap bakiyesi hesabı: bir kaydın payments[] dizisi varsa (genel gider/
+     gelir, maaş, kredi kartı taksidi — artık hepsi bunu kullanıyor), her
+     ödeme SADECE KENDİ accountId'sinin bakiyesine yazılır — bu sayede
+     maaş ödemeleri ve birden fazla hesaptan parçalı yapılan ödemeler doğru
+     hesaba düşer. payments[] hiç yoksa (transfer, tedarikçi, reçete tahsilatı
+     gibi eski/tekil-hesaplı kayıt türleri) eskisi gibi kaydın kendi üst
+     seviye accountId'sine bakılır. */
   const balanceOf = acc => {
-    const net = transactions.filter(t => t.accountId === acc.id).reduce((s, t) => s + (t.type === "gelir" ? paidAmountOf(t) : -paidAmountOf(t)), 0);
+    let net = 0;
+    transactions.forEach(t => {
+      const sign = t.type === "gelir" ? 1 : -1;
+      if (Array.isArray(t.payments)) {
+        t.payments.forEach(p => {
+          if (p.accountId === acc.id) net += sign * Number(p.amount || 0);
+        });
+      } else if (t.accountId === acc.id) {
+        net += sign * paidAmountOf(t);
+      }
+    });
     return Number(acc.openingBalance || 0) + net;
   };
   const totalBalance = accounts.reduce((s, a) => s + balanceOf(a), 0);
@@ -2290,14 +2315,26 @@ function HesaplarView({
 
   const activeAccObj = accounts.find(a => a.id === activeAcc) || null;
 
+  /* Bir kaydın BU hesaba isabet eden tutarı: payments[] varsa sadece bu
+     hesaba ait ödemelerin toplamı (maaş/parçalı-hesap ödemelerini de doğru
+     yansıtır), yoksa (transfer, tedarikçi vb.) eskisi gibi kaydın kendi
+     accountId'si bu hesapla eşleşiyorsa tüm tutar. */
+  const accountAmountFor = (t, accId) => {
+    if (Array.isArray(t.payments)) {
+      return t.payments.filter(p => p.accountId === accId).reduce((s, p) => s + Number(p.amount || 0), 0);
+    }
+    return t.accountId === accId ? paidAmountOf(t) : 0;
+  };
   const accountTxRows = useMemo(() => {
     if (!activeAccObj) return [];
-    const txs = transactions.filter(t => t.accountId === activeAccObj.id);
-    const asc = [...txs].sort((a, b) => new Date(a.date) - new Date(b.date) || String(a.id).localeCompare(String(b.id)));
+    const txs = transactions
+      .map(t => ({ t, _accountAmount: accountAmountFor(t, activeAccObj.id) }))
+      .filter(x => x._accountAmount > 0);
+    const asc = [...txs].sort((a, b) => new Date(a.t.date) - new Date(b.t.date) || String(a.t.id).localeCompare(String(b.t.id)));
     let running = Number(activeAccObj.openingBalance || 0);
-    const withBal = asc.map(t => {
-      running += t.type === "gelir" ? paidAmountOf(t) : -paidAmountOf(t);
-      return { ...t, _runningBalance: running };
+    const withBal = asc.map(({ t, _accountAmount }) => {
+      running += t.type === "gelir" ? _accountAmount : -_accountAmount;
+      return { ...t, _accountAmount, _runningBalance: running };
     });
     return withBal.slice().reverse();
   }, [transactions, activeAccObj]);
@@ -2569,7 +2606,7 @@ function HesaplarView({
                     /*#__PURE__*/React.createElement(TagBadges, { ids: t.tags, tags: tags })
                   ),
                   /*#__PURE__*/React.createElement("td", { style: { padding: "11px 20px", borderBottom: `1px solid ${C.line}`, textAlign: "right", fontWeight: 700, fontVariantNumeric: "tabular-nums", color: t.type === "gelir" ? C.green : C.red, whiteSpace: "nowrap" } },
-                    t.type === "gelir" ? "+" : "−", fmt(t.amount)
+                    t.type === "gelir" ? "+" : "−", fmt(t._accountAmount ?? t.amount)
                   ),
                   /*#__PURE__*/React.createElement("td", { style: { padding: "11px 20px", borderBottom: `1px solid ${C.line}`, textAlign: "right", fontSize: 12.5, color: C.muted, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" } },
                     /*#__PURE__*/React.createElement("span", { style: { marginRight: 10 } }, fmt(t._runningBalance)),
@@ -3306,6 +3343,11 @@ function PaymentHistoryDetail({ t, editTx, accounts, colSpan }) {
   const submitPayment = e => {
     e.preventDefault();
     if (!payForm.amount || Number(payForm.amount) <= 0) return;
+    const kalanTutar = kalanOf(t);
+    if (Number(payForm.amount) > kalanTutar) {
+      alert(`Girilen tutar (${fmt(Number(payForm.amount))}) kalan borçtan (${fmt(kalanTutar)}) fazla. Lütfen kalan tutarı aşmayacak bir miktar gir.`);
+      return;
+    }
     const account = payForm.paymentMethod === "hesaptan" ? accounts.find(a => a.id === payForm.accountId) : null;
     const newPayment = {
       id: uid(),
@@ -3455,12 +3497,13 @@ function GenelGiderler({
           } : {
             type: "monthly"
           },
+          anchorDay: parseLocalDate(form.date).getDate(),
           nextDueDate: nextRecurringDate(form.date, form.freqType === "custom" ? {
             type: "custom",
             intervalDays: Number(form.intervalDays) || 30
           } : {
             type: "monthly"
-          }),
+          }, parseLocalDate(form.date).getDate()),
           active: true
         });
       }
@@ -3993,12 +4036,13 @@ function GenelGelirler({
           } : {
             type: "monthly"
           },
+          anchorDay: parseLocalDate(form.date).getDate(),
           nextDueDate: nextRecurringDate(form.date, form.freqType === "custom" ? {
             type: "custom",
             intervalDays: Number(form.intervalDays) || 30
           } : {
             type: "monthly"
-          }),
+          }, parseLocalDate(form.date).getDate()),
           active: true
         });
       }
@@ -4581,7 +4625,8 @@ function CalisanMaaslari({
           employeeId: activeEmp,
           amount: Number(payForm.amount),
           frequency: freq,
-          nextDueDate: nextRecurringDate(payForm.date, freq),
+          anchorDay: parseLocalDate(payForm.date).getDate(),
+          nextDueDate: nextRecurringDate(payForm.date, freq, parseLocalDate(payForm.date).getDate()),
           active: true
         });
       }
@@ -6028,7 +6073,13 @@ function MonthlyTasksView({
     const rec = taskStatuses.find(s => s.templateId === templateId && s.month === month);
     return rec ? rec.status : "yapilmadi";
   };
-  const counts = taskTemplates.reduce((acc, t) => {
+  /* Arşivlenmiş (silinmiş) görevleri ve GÖRÜNTÜLENEN aydan sonra
+     oluşturulmuş görevleri gizle — bir görev daha var olmadığı geçmiş bir
+     ayda "Yapılmadı" görünüp KPI'yı yanlış şişirmesin. createdMonth alanı
+     olmayan eski görevler (bu düzeltmeden önce eklenmiş) geriye dönük
+     uyumluluk için her ayda gösterilmeye devam eder. */
+  const visibleTemplates = taskTemplates.filter(t => !t.archived && (!t.createdMonth || t.createdMonth <= month));
+  const counts = visibleTemplates.reduce((acc, t) => {
     const st = statusOf(t.id);
     acc[st] = (acc[st] || 0) + 1;
     return acc;
@@ -6090,7 +6141,7 @@ function MonthlyTasksView({
   }), /*#__PURE__*/React.createElement(KpiTicket, {
     icon: AlertTriangle,
     label: "Yapılmadı",
-    value: counts.yapilmadi || (taskTemplates.length - (counts.yapildi || 0) - (counts.devam_ediyor || 0)),
+    value: counts.yapilmadi || (visibleTemplates.length - (counts.yapildi || 0) - (counts.devam_ediyor || 0)),
     accent: C.red
   })), /*#__PURE__*/React.createElement("form", {
     onSubmit: submit,
@@ -6123,7 +6174,7 @@ function MonthlyTasksView({
     }
   }, /*#__PURE__*/React.createElement(Plus, {
     size: 15
-  }), " Görev Ekle")), taskTemplates.length === 0 ? /*#__PURE__*/React.createElement("div", {
+  }), " Görev Ekle")), visibleTemplates.length === 0 ? /*#__PURE__*/React.createElement("div", {
     style: {
       background: C.card,
       borderRadius: 18,
@@ -6140,7 +6191,7 @@ function MonthlyTasksView({
       boxShadow: "0 1px 2px rgba(20,20,16,0.03), 0 10px 26px rgba(20,20,16,0.06)",
       overflow: "hidden"
     }
-  }, taskTemplates.map((t, i) => {
+  }, visibleTemplates.map((t, i) => {
     const st = statusOf(t.id);
     return /*#__PURE__*/React.createElement("div", {
       key: t.id,
@@ -6589,9 +6640,13 @@ function KrediKartlariView({
   editCharge,
   removeCharge,
   togglePaidInstallment,
-  suppliers
+  suppliers,
+  accounts
 }) {
   const [openCard, setOpenCard] = useState(false);
+  const [confirmingPay, setConfirmingPay] = useState(null); // {chargeId, index}
+  const [payMethod, setPayMethod] = useState("hesaptan");
+  const [payAccountId, setPayAccountId] = useState((accounts || [])[0]?.id || "");
   const blankCardForm = {
     name: "",
     bankName: ""
@@ -6779,7 +6834,7 @@ function KrediKartlariView({
       style: {
         padding: "10px 16px"
       }
-    }, /*#__PURE__*/React.createElement("button", {
+    }, r.paid ? /*#__PURE__*/React.createElement("button", {
       onClick: () => togglePaidInstallment(r.chargeId, r.index),
       style: {
         border: "none",
@@ -6788,10 +6843,51 @@ function KrediKartlariView({
         padding: "4px 10px",
         fontSize: 12,
         fontWeight: 600,
-        background: r.paid ? C.greenSoft : isOverdue ? C.redSoft : C.amberSoft,
-        color: r.paid ? C.green : isOverdue ? C.red : C.amber
+        background: C.greenSoft,
+        color: C.green
       }
-    }, r.paid ? "Ödendi" : isOverdue ? "Gecikti" : "Bekliyor")));
+    }, "Ödendi") : confirmingPay && confirmingPay.chargeId === r.chargeId && confirmingPay.index === r.index ? /*#__PURE__*/React.createElement("div", {
+      style: { display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap" }
+    },
+      /*#__PURE__*/React.createElement("select", {
+        value: payMethod,
+        onChange: e => setPayMethod(e.target.value),
+        style: { fontSize: 11.5, padding: "3px 4px", borderRadius: 6, border: `1px solid ${C.line}` }
+      }, /*#__PURE__*/React.createElement("option", { value: "hesaptan" }, "Hesaptan"), /*#__PURE__*/React.createElement("option", { value: "elden" }, "Elden")),
+      payMethod === "hesaptan" && /*#__PURE__*/React.createElement("select", {
+        value: payAccountId,
+        onChange: e => setPayAccountId(e.target.value),
+        style: { fontSize: 11.5, padding: "3px 4px", borderRadius: 6, border: `1px solid ${C.line}`, maxWidth: 120 }
+      }, (accounts || []).map(a => /*#__PURE__*/React.createElement("option", { key: a.id, value: a.id }, a.bankName || a.name))),
+      /*#__PURE__*/React.createElement("button", {
+        onClick: () => {
+          if (payMethod === "hesaptan" && !payAccountId) return;
+          togglePaidInstallment(r.chargeId, r.index, { paymentMethod: payMethod, accountId: payAccountId });
+          setConfirmingPay(null);
+        },
+        style: { border: "none", cursor: "pointer", borderRadius: 20, padding: "4px 10px", fontSize: 11.5, fontWeight: 600, background: C.greenSoft, color: C.green }
+      }, "Onayla"),
+      /*#__PURE__*/React.createElement("button", {
+        onClick: () => setConfirmingPay(null),
+        style: { border: "none", cursor: "pointer", background: "none", fontSize: 11.5, color: C.muted }
+      }, "Vazgeç")
+    ) : /*#__PURE__*/React.createElement("button", {
+      onClick: () => {
+        setPayMethod("hesaptan");
+        setPayAccountId((accounts || [])[0]?.id || "");
+        setConfirmingPay({ chargeId: r.chargeId, index: r.index });
+      },
+      style: {
+        border: "none",
+        cursor: "pointer",
+        borderRadius: 20,
+        padding: "4px 10px",
+        fontSize: 12,
+        fontWeight: 600,
+        background: isOverdue ? C.redSoft : C.amberSoft,
+        color: isOverdue ? C.red : C.amber
+      }
+    }, isOverdue ? "Gecikti" : "Bekliyor")));
   })))), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
@@ -7876,7 +7972,13 @@ const IZIN_KANUN_MADDELERI = ["Madde 53: Kıdeme göre yıllık izin hakkı — 
 function dayCount(start, end) {
   const s = new Date(start),
     e = new Date(end);
-  return Math.max(1, Math.round((e - s) / 86400000) + 1);
+  /* Bitiş tarihi başlangıçtan önceyse (ters/geçersiz aralık) 0 döndür —
+     eskiden Math.max(1, ...) negatif farkı sessizce "1 gün"e yuvarlıyordu.
+     Geçerli bir aralık formda zaten submit()'te ayrıca engelleniyor, bu
+     sadece dayCount'un kendi başına çağrıldığı yerlerde de yanlış sonuç
+     üretmemesi için ek bir güvence. */
+  const diff = Math.round((e - s) / 86400000) + 1;
+  return diff > 0 ? diff : 0;
 }
 
 /* 4857 sayılı İş Kanunu Madde 56/5: "Yıllık ücretli izin süresine rastlayan
@@ -8873,6 +8975,10 @@ function IzinlerView({
   const submit = e => {
     e.preventDefault();
     if (!form.employeeId || !form.startDate || !form.endDate) return;
+    if (form.endDate < form.startDate) {
+      alert("Son İzin Günü, Başlangıç Tarihinden önce olamaz. Lütfen tarihleri kontrol et.");
+      return;
+    }
     if (editingId) {
       editLeave(editingId, form);
     } else {
@@ -9504,7 +9610,7 @@ function App() {
               recurringTemplateId: tpl.id
             });
           }
-          next = nextRecurringDate(next, tpl.frequency);
+          next = nextRecurringDate(next, tpl.frequency, tpl.anchorDay || parseLocalDate(tpl.nextDueDate).getDate());
           guard++;
         }
         return next === tpl.nextDueDate ? tpl : { ...tpl, nextDueDate: next };
@@ -10096,7 +10202,11 @@ function App() {
       return next;
     });
   }, []);
-  const togglePaidInstallment = useCallback((chargeId, index) => {
+  /* payDetails: { accountId, paymentMethod, accountName } — taksit "ödendi"
+     işaretlenirken hangi kasa/banka hesabından (veya elden) ödendiğini
+     kaydeder; bu sayede kredi kartı ödemesi de diğer kayıtlar gibi
+     payments[] üzerinden doğru hesabın bakiyesinden düşer. */
+  const togglePaidInstallment = useCallback((chargeId, index, payDetails) => {
     const charge = charges.find(c => c.id === chargeId);
     const alreadyPaid = charge ? (charge.paidInstallments || []).includes(index) : false;
     setCharges(prev => {
@@ -10114,6 +10224,8 @@ function App() {
     if (charge && !alreadyPaid) {
       const inst = installmentsFor(charge).find(i => i.index === index);
       if (inst) {
+        const isElden = payDetails?.paymentMethod === "elden";
+        const payAcc = !isElden ? accounts.find(a => a.id === payDetails?.accountId) : null;
         addTx({
           id: uid(),
           type: "gider",
@@ -10125,7 +10237,15 @@ function App() {
           date: inst.date,
           amount: Number(inst.amount),
           description: `${charge.supplierName || ""} taksit ${inst.index}/${inst.of}`,
-          tags: []
+          tags: [],
+          payments: [{
+            id: uid(),
+            date: inst.date,
+            amount: Number(inst.amount),
+            paymentMethod: isElden ? "elden" : "hesaptan",
+            accountId: isElden ? null : payAcc?.id || null,
+            accountName: payAcc ? payAcc.bankName || payAcc.name : null
+          }]
         });
       }
     } else if (charge && alreadyPaid) {
@@ -10135,7 +10255,7 @@ function App() {
         return nextTx;
       });
     }
-  }, [charges]);
+  }, [charges, accounts]);
   const addDeduction = useCallback(d => {
     setDeductions(prev => {
       const next = [...prev, d];
@@ -10238,21 +10358,24 @@ function App() {
     setTaskTemplates(prev => {
       const next = [...prev, {
         id: uid(),
-        name: name
+        name: name,
+        /* Görev bu aydan itibaren geçerli — geçmiş aylarda "Yapılmadı"
+           görünüp KPI'ları yanlış şişirmemesi için (bkz. MonthlyTasksView'da
+           visibleTemplates filtresi). */
+        createdMonth: todayStr().slice(0, 7)
       }];
       saveKey("ecz-task-templates", next);
       return next;
     });
   }, []);
+  /* Bir görevi "silmek" onu arşivler (archived: true) — kaydı ve o göreve
+     ait TÜM geçmiş taskStatuses kayıtlarını KALICI OLARAK SİLMEZ. Eskiden
+     bu fonksiyon taskStatuses'u da filtreleyip görevin tüm geçmiş
+     yapıldı/yapılmadı işaretlerini geri dönüşü olmayan şekilde siliyordu. */
   const removeTaskTemplate = useCallback(id => {
     setTaskTemplates(prev => {
-      const next = prev.filter(t => t.id !== id);
+      const next = prev.map(t => t.id === id ? { ...t, archived: true, archivedAt: todayStr() } : t);
       saveKey("ecz-task-templates", next);
-      return next;
-    });
-    setTaskStatuses(prev => {
-      const next = prev.filter(s => s.templateId !== id);
-      saveKey("ecz-task-statuses", next);
       return next;
     });
   }, []);
@@ -11321,7 +11444,8 @@ function App() {
     editCharge: editCharge,
     removeCharge: removeCharge,
     togglePaidInstallment: togglePaidInstallment,
-    suppliers: suppliers
+    suppliers: suppliers,
+    accounts: accounts
   }), tab === "kesintiler" && /*#__PURE__*/React.createElement(KesintilerView, {
     prescriptions: permFor("sgk") === "gizli" ? [] : prescriptions,
     deductions: deductions,

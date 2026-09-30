@@ -912,6 +912,43 @@ function paymentStatusOf(t) {
    ödenmiş) bir kayıt, eski status alanı hâlâ "bekliyor" görünse bile
    burada doğru şekilde "en az bir kısmı ödendi" sayılır. */
 const isPaid = t => paymentStatusOf(t) !== "bekliyor";
+/* ---- Maaş avansı / ara ödeme mahsubu (v1.1.15) ----
+   Çalışana dönem arasında yapılan ödeme ("Avans / Ara Ödeme"), ayrı bir
+   maaş kaydı gibi değil, çalışanın ÖDENMEMİŞ maaşından düşülecek bir ön
+   ödeme olarak tutulur: kayıt { giderTuru:"maas", maasTuru:"avans" } ve
+   her zaman ödenmiş (payments[] = tutar) — yani parası Kasa/Banka'dan bir
+   kez çıkar. Mahsup SAKLANMAZ, her seferinde hesaplanır: çalışanın tüm
+   avanslarının toplamı, en eski ödenmemiş maaş kaydından başlayarak
+   kalanlardan düşülür; artan kısım "avans bakiyesi" olarak bir sonraki
+   maaşa devreder. Böylece maaş kaydı ayrıca "ödendi" işaretlenmediği için
+   Kasa'dan ikinci kez para düşmez, ama bekleyen maaş doğru görünür. */
+const isMaasAvans = t => !!t && t.giderTuru === "maas" && t.maasTuru === "avans";
+function maasMahsupHesapla(transactions) {
+  const byEmp = {};
+  (transactions || []).forEach(t => {
+    if (t.type === "gider" && t.giderTuru === "maas") {
+      if (!byEmp[t.employeeId]) byEmp[t.employeeId] = [];
+      byEmp[t.employeeId].push(t);
+    }
+  });
+  const mahsup = new Map();
+  const avansBakiye = {};
+  Object.keys(byEmp).forEach(empId => {
+    const list = byEmp[empId];
+    let pool = list.filter(isMaasAvans).reduce((s, t) => s + paidAmountOf(t), 0);
+    list.filter(t => !isMaasAvans(t)).sort((a, b) => String(a.dueDate || a.date).localeCompare(String(b.dueDate || b.date)) || String(a.id).localeCompare(String(b.id))).forEach(t => {
+      const m = Math.round(Math.min(pool, kalanOf(t)) * 100) / 100;
+      if (m > 0) {
+        mahsup.set(t.id, m);
+        pool = Math.round((pool - m) * 100) / 100;
+      }
+    });
+    avansBakiye[empId] = pool > 0 ? pool : 0;
+  });
+  return { mahsup, avansBakiye };
+}
+/* Bir maaş kaydının avans mahsubu sonrası gerçekten kalan tutarı. */
+const maasKalanOf = (t, mh) => isMaasAvans(t) ? 0 : Math.max(0, kalanOf(t) - (mh && mh.mahsup.get(t.id) || 0));
 /* "YYYY-MM" formatında iki ay arasındaki tüm ayları (dahil) sırayla döndürür.
    Çalışan maaşı gecikme/tekrarlama hesaplarında kullanılır. */
 function monthsBetweenInclusive(startMonth, endMonth) {
@@ -995,7 +1032,10 @@ async function loadKey(key, fallback) {
 async function saveKey(key, value) {
   try {
     localStorage.setItem(key, JSON.stringify(value));
-    if (SYNC_STORAGE_KEYS.has(key)) scheduleFsSync();
+    if (SYNC_STORAGE_KEYS.has(key)) {
+      syncTrackLocal(key, value);
+      scheduleFsSync();
+    }
   } catch (e) {
     console.error("storage error", e);
   }
@@ -1043,9 +1083,14 @@ let fsHandle = null; // tarayıcı modu: FileSystemFileHandle
 let fsPath = null; // Tauri modu: dosya yolu (string)
 let fsWriteTimer = null;
 let fsListeners = [];
-let fsLastWrittenContent = null; // Tauri modu: kendi yazdığımızı, dışarıdan gelen değişiklikten ayırt etmek için
 let fsUnlistenWatch = null; // Tauri modu: dosya izleyici olay aboneliğini iptal eden fonksiyon
-let fsApplyRemoteHandler = null; // App bileşeninin importDataObject'ini buraya bağlar
+let fsApplyRemoteHandler = null; // App bileşeninin mergeRemoteObject'ini buraya bağlar
+let fsLastSeenText = null; // dosyada en son gördüğümüz/yazdığımız içerik (kendi yazdığımızı tanımak için)
+let fsLocalVersion = 0; // bu cihazda yapılan her yerel değişiklikte artar
+let fsWrittenVersion = 0; // dosyaya en son yazılan yerel sürüm
+let fsForceNext = false; // "Senkron Hatası" butonu: okunamayan dosyanın üzerine yine de yaz
+let fsSyncChain = Promise.resolve(); // senkron adımlarını sıraya koyar (aynı anda iki okuma/yazma olmasın)
+let fsPollStarted = false;
 
 function fsNotify(status) {
   fsListeners.forEach(fn => {
@@ -1061,25 +1106,233 @@ function fsSubscribe(fn) {
   };
 }
 // App bileşeni, uzaktan (başka bir cihazdan) gelen değişiklikleri kendi state'ine
-// uygulayabilmesi için importDataObject fonksiyonunu burada kaydeder.
+// birleştirerek uygulayabilmesi için mergeRemoteObject fonksiyonunu burada kaydeder.
 function fsSetApplyRemoteHandler(fn) {
   fsApplyRemoteHandler = fn;
 }
+
+/* ---------- KAYIT BAZLI SENKRON (v1.1.15) ----------
+   Eskiden her senkron yazımı TÜM veriyi dosyaya yazıyor, diğer cihaz da dosyada
+   ne varsa kendi verisini TAMAMEN onunla değiştiriyordu ("son yazan kazanır").
+   Bu yüzden bir cihazda silinen kayıt, diğer cihaz eski halini yazınca geri
+   geliyordu. Artık:
+     - Her cihaz, her kaydın en son ne zaman değiştiğini (`r`: id -> "zaman:özet")
+       ve hangi kayıtların ne zaman silindiğini (`d`: id -> zaman, "tombstone")
+       ayrı bir yerel kayıtta (ecz-sync-meta) tutar. Bu bilgi saveKey'de, yapılan
+       değişiklik önceki halle karşılaştırılarak otomatik çıkarılır — uygulamanın
+       geri kalanındaki hiçbir ekle/düzenle/sil fonksiyonunun değişmesi gerekmez.
+     - Dosyaya bu bilgi de (`meta`) yazılır. Dosyadan okurken kayıt kayıt
+       birleştirilir: aynı kaydın iki cihazdaki halinden en son değişen kazanır,
+       silme işlemi (tombstone) kendisinden ÖNCEKİ bir düzenlemeyi yener.
+     - Her yazmadan önce dosya okunup birleştirilir; birleştirme sonrası dosyaya
+       yeni bir şey eklenmeyecekse hiç yazılmaz (iki cihaz arasında sonsuz
+       "yaz-oku-yaz" döngüsü oluşmaz). */
+const SYNC_META_KEY = "ecz-sync-meta";
+const SYNC_TOMBSTONE_TTL_MS = 400 * 24 * 60 * 60 * 1000; // ~13 ay sonra silme izleri temizlenir
+let syncMetaCache = null;
+function syncHash(str) {
+  let h = 5381;
+  for (let i = 0; i < str.length; i++) h = (h * 33 + str.charCodeAt(i)) | 0;
+  return (h >>> 0).toString(36) + str.length.toString(36);
+}
+const syncRecHash = rec => syncHash(JSON.stringify(rec));
+const syncMetaT = s => Number(String(s).split(":")[0]) || 0;
+const syncMetaH = s => String(s).split(":")[1] || "";
+function syncIsRecordList(v) {
+  if (!Array.isArray(v)) return false;
+  const ids = new Set();
+  for (const r of v) {
+    if (!r || typeof r !== "object" || (typeof r.id !== "string" && typeof r.id !== "number")) return false;
+    const id = String(r.id);
+    if (ids.has(id)) return false;
+    ids.add(id);
+  }
+  return true;
+}
+function syncLoadMeta() {
+  if (syncMetaCache) return syncMetaCache;
+  try {
+    const m = JSON.parse(localStorage.getItem(SYNC_META_KEY) || "null");
+    syncMetaCache = m && typeof m === "object" && m.keys ? m : { v: 2, keys: {} };
+  } catch {
+    syncMetaCache = { v: 2, keys: {} };
+  }
+  return syncMetaCache;
+}
+function syncSaveMeta() {
+  try {
+    localStorage.setItem(SYNC_META_KEY, JSON.stringify(syncMetaCache || { v: 2, keys: {} }));
+  } catch (e) {
+    console.error("sync meta save error", e);
+  }
+}
+function syncReadLocal(storageKey) {
+  try {
+    const raw = localStorage.getItem(storageKey);
+    return raw !== null ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+function syncPrune(d, now) {
+  Object.keys(d).forEach(id => {
+    if (now - d[id] > SYNC_TOMBSTONE_TTL_MS) delete d[id];
+  });
+  return d;
+}
+/* Bir anahtarın mevcut değeri için "başlangıç" bilgisini zaman=0 ile oluşturur.
+   Bu sürüme ilk geçişte var olan veriler "çok eski" sayılır; böylece güncel
+   olmayan bir cihaz ilk açılışta kendi eski verisini "en yeni" gibi dayatamaz. */
+function syncBaselineFor(value) {
+  if (syncIsRecordList(value)) {
+    const r = {};
+    value.forEach(rec => {
+      r[String(rec.id)] = "0:" + syncRecHash(rec);
+    });
+    return { r, d: {} };
+  }
+  return { w: 0, h: syncRecHash(value) };
+}
+function syncEnsureBaseline() {
+  try {
+    const meta = syncLoadMeta();
+    let changed = false;
+    Object.values(SYNC_KEY_MAP).forEach(storageKey => {
+      if (!meta.keys[storageKey]) {
+        meta.keys[storageKey] = syncBaselineFor(syncReadLocal(storageKey));
+        changed = true;
+      }
+    });
+    if (changed) syncSaveMeta();
+  } catch (e) {
+    console.error("sync baseline error", e);
+  }
+}
+/* saveKey her kayıtta bunu çağırır: yeni değeri önceki halle karşılaştırıp
+   eklenen/değişen kayıtlara "şimdi" zamanını, kaybolan kayıtlara silme izi yazar. */
+function syncTrackLocal(storageKey, value, now = Date.now()) {
+  const meta = syncLoadMeta();
+  let km = meta.keys[storageKey];
+  if (syncIsRecordList(value)) {
+    if (!km || !km.r) km = { r: {}, d: {} };
+    const seen = new Set();
+    value.forEach(rec => {
+      const id = String(rec.id);
+      seen.add(id);
+      const h = syncRecHash(rec);
+      const cur = km.r[id];
+      if (!cur || syncMetaH(cur) !== h) km.r[id] = now + ":" + h;
+      if (km.d[id] !== undefined) delete km.d[id];
+    });
+    Object.keys(km.r).forEach(id => {
+      if (!seen.has(id)) {
+        delete km.r[id];
+        km.d[id] = now;
+      }
+    });
+    syncPrune(km.d, now);
+  } else {
+    const h = syncRecHash(value);
+    if (!km || km.r || km.h !== h) km = { w: now, h };
+  }
+  meta.keys[storageKey] = km;
+  syncSaveMeta();
+}
+/* Tek bir veri türünü (ör. transactions) yerel ve uzak halleriyle birleştirir.
+   Döner: value (birleşmiş değer), km (birleşmiş meta), localChanged (yerel
+   değişmeli mi), remoteBehind (dosyada olmayan bir şey var mı → yazılmalı). */
+function syncMergeKey(localVal, localKm, remoteVal, remoteKm, now = Date.now()) {
+  if (syncIsRecordList(localVal) && syncIsRecordList(remoteVal)) {
+    const lr = localKm && localKm.r || {},
+      ld = localKm && localKm.d || {};
+    const rr = remoteKm && remoteKm.r || {},
+      rd = remoteKm && remoteKm.d || {};
+    const lMap = new Map(localVal.map(x => [String(x.id), x]));
+    const rMap = new Map(remoteVal.map(x => [String(x.id), x]));
+    const ids = new Set([...lMap.keys(), ...rMap.keys(), ...Object.keys(ld), ...Object.keys(rd)]);
+    const winners = new Map();
+    const remoteHash = new Map();
+    const outR = {},
+      outD = {};
+    ids.forEach(id => {
+      let L = null,
+        R = null;
+      if (lMap.has(id)) {
+        const rec = lMap.get(id);
+        const h = syncRecHash(rec);
+        const m = lr[id];
+        // meta ile uyuşmayan yerel kayıt = henüz izlenmemiş yerel değişiklik → en yeni say
+        const t = m ? syncMetaH(m) === h ? syncMetaT(m) : now : 0;
+        L = { rec, h, t, local: true };
+      }
+      if (rMap.has(id)) {
+        const rec = rMap.get(id);
+        const h = syncRecHash(rec);
+        remoteHash.set(id, h);
+        const m = rr[id];
+        R = { rec, h, t: m && syncMetaH(m) === h ? syncMetaT(m) : 0, local: false };
+      }
+      let best = L || R;
+      if (L && R) {
+        if (L.h === R.h) best = L.t >= R.t ? L : { ...L, t: R.t };
+        else if (L.t !== R.t) best = L.t > R.t ? L : R;
+        else best = L.h > R.h ? L : R; // eşitlikte iki cihaz da aynı sonucu seçsin
+      }
+      const del = Math.max(ld[id] !== undefined ? ld[id] : -1, rd[id] !== undefined ? rd[id] : -1);
+      if (del >= 0 && (!best || del >= best.t)) {
+        outD[id] = del;
+      } else if (best) {
+        winners.set(id, best);
+        outR[id] = best.t + ":" + best.h;
+      }
+    });
+    syncPrune(outD, now);
+    const out = [];
+    const placed = new Set();
+    localVal.forEach(x => {
+      const id = String(x.id);
+      if (winners.has(id)) {
+        out.push(winners.get(id).rec);
+        placed.add(id);
+      }
+    });
+    remoteVal.forEach(x => {
+      const id = String(x.id);
+      if (winners.has(id) && !placed.has(id)) {
+        out.push(winners.get(id).rec);
+        placed.add(id);
+      }
+    });
+    const localChanged = out.length !== localVal.length || out.some((x, i) => x !== localVal[i]);
+    const remoteBehind = out.length !== rMap.size || out.some(x => {
+      const id = String(x.id);
+      return remoteHash.get(id) !== winners.get(id).h;
+    }) || !!(remoteKm && remoteKm.d) && Object.keys(outD).some(id => rd[id] === undefined); // eski sürüm (meta'sız) dosyaya sırf silme izi için yazma
+    return { value: out, km: { r: outR, d: outD }, localChanged, remoteBehind };
+  }
+  // Kayıt listesi olmayan değerler (ör. ayarlar): bütün olarak en son değişen kazanır.
+  const hL = syncRecHash(localVal),
+    hR = syncRecHash(remoteVal);
+  const tL = localKm && !localKm.r && localKm.h === hL ? localKm.w || 0 : localKm ? now : 0;
+  const tR = remoteKm && !remoteKm.r && remoteKm.h === hR ? remoteKm.w || 0 : 0;
+  if (hL === hR) return { value: localVal, km: { w: Math.max(tL, tR), h: hL }, localChanged: false, remoteBehind: false };
+  const remoteWins = tR > tL || tR === tL && hR > hL;
+  return remoteWins ? { value: remoteVal, km: { w: tR, h: hR }, localChanged: true, remoteBehind: false } : { value: localVal, km: { w: tL, h: hL }, localChanged: false, remoteBehind: true };
+}
 function collectSyncPayload() {
   const data = {};
+  const meta = {};
+  const allMeta = syncLoadMeta();
   Object.entries(SYNC_KEY_MAP).forEach(([field, storageKey]) => {
-    try {
-      const raw = localStorage.getItem(storageKey);
-      data[field] = raw !== null ? JSON.parse(raw) : [];
-    } catch {
-      data[field] = [];
-    }
+    data[field] = syncReadLocal(storageKey);
+    if (allMeta.keys[storageKey]) meta[field] = allMeta.keys[storageKey];
   });
   return {
     exportedAt: new Date().toISOString(),
     app: "pharmafin",
-    version: 1,
-    data
+    version: 2,
+    data,
+    meta
   };
 }
 
@@ -1129,24 +1382,25 @@ async function idbClearHandle() {
     });
   } catch {}
 }
-async function fsWriteNowBrowser() {
-  if (!fsHandle) return;
-  try {
-    const perm = await fsHandle.queryPermission({
-      mode: "readwrite"
-    });
-    if (perm !== "granted") {
-      fsNotify("needs-permission");
-      return;
-    }
-    const writable = await fsHandle.createWritable();
-    await writable.write(JSON.stringify(collectSyncPayload(), null, 2));
-    await writable.close();
-    fsNotify("connected");
-  } catch (e) {
-    console.error("auto sync write error", e);
-    fsNotify("error");
+async function fsBrowserHasPermission() {
+  if (!fsHandle) return false;
+  const perm = await fsHandle.queryPermission({
+    mode: "readwrite"
+  });
+  if (perm !== "granted") {
+    fsNotify("needs-permission");
+    return false;
   }
+  return true;
+}
+async function fsReadTextBrowser() {
+  const f = await fsHandle.getFile();
+  return await f.text();
+}
+async function fsWriteTextBrowser(content) {
+  const writable = await fsHandle.createWritable();
+  await writable.write(content);
+  await writable.close();
 }
 async function fsTryReconnectBrowser() {
   const handle = await idbGetHandle();
@@ -1159,7 +1413,12 @@ async function fsTryReconnectBrowser() {
       mode: "readwrite"
     });
     fsHandle = handle;
+    fsLastSeenText = null;
     fsNotify(perm === "granted" ? "connected" : "needs-permission");
+    if (perm === "granted") {
+      fsStartPolling();
+      setTimeout(fsSyncNow, 1500);
+    }
   } catch {
     fsNotify("disconnected");
   }
@@ -1172,7 +1431,8 @@ async function fsGrantPermissionBrowser() {
     });
     if (perm === "granted") {
       fsNotify("connected");
-      await fsWriteNowBrowser();
+      fsStartPolling();
+      await fsSyncNow();
       return true;
     }
     fsNotify("needs-permission");
@@ -1203,8 +1463,10 @@ async function fsConnectBrowser() {
       existingText = await f.text();
     } catch {}
     fsHandle = handle;
+    fsLastSeenText = null;
     await idbSetHandle(handle);
     fsNotify("connected");
+    fsStartPolling();
     return {
       handle,
       existingText: existingText && existingText.trim() ? existingText : null
@@ -1216,6 +1478,7 @@ async function fsConnectBrowser() {
 }
 async function fsDisconnectBrowser() {
   fsHandle = null;
+  fsLastSeenText = null;
   clearTimeout(fsWriteTimer);
   await idbClearHandle();
   fsNotify("disconnected");
@@ -1234,39 +1497,22 @@ async function tauriStartWatch(path) {
     fsUnlistenWatch();
     fsUnlistenWatch = null;
   }
-  fsUnlistenWatch = await window.__TAURI__.event.listen("sync-file-changed", async () => {
-    if (!fsPath) return;
-    try {
-      const text = await window.__TAURI__.core.invoke("read_sync_file", {
-        path: fsPath
-      });
-      // Kendi az önce yaptığımız yazmayı ya da boş dosyayı görmezden gel.
-      if (!text || text === fsLastWrittenContent) return;
-      const parsed = JSON.parse(text);
-      if (fsApplyRemoteHandler) {
-        await fsApplyRemoteHandler(parsed.data || parsed);
-      }
-      fsLastWrittenContent = text;
-      fsNotify("connected");
-    } catch (e) {
-      console.error("remote change apply error", e);
-    }
+  // Dosya dışarıdan (başka cihazdan) değiştiğinde: oku, kayıt kayıt birleştir,
+  // gerekiyorsa (bu cihazda dosyada olmayan yenilik varsa) geri yaz.
+  fsUnlistenWatch = await window.__TAURI__.event.listen("sync-file-changed", () => {
+    if (fsPath) fsSyncNow();
   });
 }
-async function fsWriteNowTauri() {
-  if (!fsPath) return;
-  try {
-    const content = JSON.stringify(collectSyncPayload(), null, 2);
-    await window.__TAURI__.core.invoke("write_sync_file", {
-      path: fsPath,
-      contents: content
-    });
-    fsLastWrittenContent = content;
-    fsNotify("connected");
-  } catch (e) {
-    console.error("auto sync write error", e);
-    fsNotify("error");
-  }
+async function fsReadTextTauri() {
+  return await window.__TAURI__.core.invoke("read_sync_file", {
+    path: fsPath
+  });
+}
+async function fsWriteTextTauri(content) {
+  await window.__TAURI__.core.invoke("write_sync_file", {
+    path: fsPath,
+    contents: content
+  });
 }
 async function fsTryReconnectTauri() {
   const saved = localStorage.getItem(TAURI_SYNC_PATH_KEY);
@@ -1275,8 +1521,12 @@ async function fsTryReconnectTauri() {
     return;
   }
   fsPath = saved;
+  fsLastSeenText = null;
   fsNotify("connected");
   await tauriStartWatch(saved);
+  fsStartPolling();
+  // Uygulama kapalıyken diğer cihazda yapılanları açılışta hemen al.
+  setTimeout(fsSyncNow, 1500);
 }
 async function fsConnectTauri() {
   try {
@@ -1297,9 +1547,11 @@ async function fsConnectTauri() {
       console.error(e);
     }
     fsPath = path;
+    fsLastSeenText = null;
     localStorage.setItem(TAURI_SYNC_PATH_KEY, path);
     fsNotify("connected");
     await tauriStartWatch(path);
+    fsStartPolling();
     return {
       existingText: existingText && existingText.trim() ? existingText : null
     };
@@ -1310,7 +1562,7 @@ async function fsConnectTauri() {
 }
 async function fsDisconnectTauri() {
   fsPath = null;
-  fsLastWrittenContent = null;
+  fsLastSeenText = null;
   clearTimeout(fsWriteTimer);
   localStorage.removeItem(TAURI_SYNC_PATH_KEY);
   if (fsUnlistenWatch) {
@@ -1323,14 +1575,94 @@ async function fsDisconnectTauri() {
   fsNotify("disconnected");
 }
 
+/* ---------- Ortak senkron adımı: oku → birleştir → (gerekirse) yaz ---------- */
+const fsIsConnected = () => IS_TAURI ? !!fsPath : !!fsHandle;
+async function fsSyncOnce() {
+  if (!fsIsConnected()) return;
+  if (!IS_TAURI && !(await fsBrowserHasPermission())) return;
+  const force = fsForceNext;
+  fsForceNext = false;
+  let text = "";
+  try {
+    text = IS_TAURI ? await fsReadTextTauri() : await fsReadTextBrowser();
+  } catch (e) {
+    console.error("sync read error", e);
+    if (!force) {
+      fsNotify("error");
+      return;
+    }
+  }
+  let mustWrite = fsLocalVersion !== fsWrittenVersion;
+  if (!text || !text.trim()) {
+    mustWrite = true; // boş/yeni dosya
+  } else if (text !== fsLastSeenText) {
+    let parsed = null;
+    try {
+      parsed = JSON.parse(text);
+    } catch {}
+    if (parsed && typeof parsed === "object" && fsApplyRemoteHandler) {
+      const res = await fsApplyRemoteHandler(parsed);
+      if (!res || res.remoteBehind) mustWrite = true;
+      fsLastSeenText = text;
+    } else if (!parsed && !force) {
+      // Okunamayan/yarım dosya (bulut istemcisi henüz tam indirmemiş olabilir):
+      // üzerine yazma, bir sonraki denemede tekrar bak.
+      fsNotify("error");
+      return;
+    } else {
+      mustWrite = true;
+    }
+  }
+  if (!mustWrite) {
+    fsNotify("connected");
+    return;
+  }
+  if (!fsIsConnected()) return;
+  const version = fsLocalVersion;
+  const content = JSON.stringify(collectSyncPayload(), null, 2);
+  try {
+    if (IS_TAURI) await fsWriteTextTauri(content);else await fsWriteTextBrowser(content);
+    fsLastSeenText = content;
+    fsWrittenVersion = version;
+    fsNotify("connected");
+  } catch (e) {
+    console.error("auto sync write error", e);
+    fsNotify("error");
+  }
+}
+function fsSyncNow() {
+  fsSyncChain = fsSyncChain.then(fsSyncOnce).catch(e => {
+    console.error("sync error", e);
+    fsNotify("error");
+  });
+  return fsSyncChain;
+}
+// Dosya izleyicisi bir değişikliği kaçırsa bile (ör. bulut istemcisinin yazma
+// şekli yüzünden) veri gecikmeli de olsa mutlaka gelsin: düzenli aralıklarla ve
+// pencereye her dönüldüğünde dosya kontrol edilir. Dosya değişmemişse hiçbir
+// şey yapılmaz (sadece okunur).
+function fsStartPolling() {
+  if (fsPollStarted || typeof window === "undefined") return;
+  fsPollStarted = true;
+  setInterval(() => {
+    if (fsIsConnected()) fsSyncNow();
+  }, 20000);
+  window.addEventListener("focus", () => {
+    if (fsIsConnected()) fsSyncNow();
+  });
+}
+
 /* ---------- Ortak arayüz: App bileşeni sadece bu fonksiyonları çağırır ---------- */
+// "Senkron Hatası" butonu ve bağlantı kurulumu: dosya okunamasa bile yazmayı dene.
 async function fsWriteNow() {
-  return IS_TAURI ? fsWriteNowTauri() : fsWriteNowBrowser();
+  fsForceNext = true;
+  return fsSyncNow();
 }
 function scheduleFsSync() {
-  if (IS_TAURI ? !fsPath : !fsHandle) return;
+  fsLocalVersion++;
+  if (!fsIsConnected()) return;
   clearTimeout(fsWriteTimer);
-  fsWriteTimer = setTimeout(fsWriteNow, 600);
+  fsWriteTimer = setTimeout(fsSyncNow, 600);
 }
 async function fsTryReconnect() {
   return IS_TAURI ? fsTryReconnectTauri() : fsTryReconnectBrowser();
@@ -1344,6 +1676,7 @@ async function fsConnect() {
 async function fsDisconnect() {
   return IS_TAURI ? fsDisconnectTauri() : fsDisconnectBrowser();
 }
+syncEnsureBaseline();
 function GlobalStyle() {
   return /*#__PURE__*/React.createElement("style", null, `
       .ecz-root {
@@ -2777,6 +3110,43 @@ function HesaplarView({
 }
 
 /* ---------------- GÜNLÜK KASA SAYIMI ---------------- */
+const SAYIM_TX_CATEGORY = "Günlük Kasa Sayımı";
+/* Bir sayım kaydı "Kasa"ya gelir olarak işlenmeli mi? (hesap seçili ve Kasa tutarı > 0) */
+const sayimBeklerKasa = c => !!c.accountId && Number(c.kasa) > 0;
+/* Her günlük sayım kaydını Kasa'daki bağlı gelir işlemiyle eşler.
+   v1.1.15'ten itibaren her sayım, oluşturduğu Kasa işleminin id'sini `txId`
+   alanında tutar (işlem de sayımın id'sini `countId` alanında). Bu alanlar
+   olmadan kaydedilmiş eski sayımlar için aynı tarih + hesap + kategoriye
+   sahip, başka bir sayıma bağlanmamış işlem aranır (önce tutarı da tutan,
+   sonra tutarı farklı olan — sonradan düzenlenmiş eski kayıtlar). Hiçbir
+   sayıma bağlanamayan "Günlük Kasa Sayımı" işlemleri `orphanTx` olarak
+   döner: bunlar genelde silinmiş bir sayımdan kalan ya da "sil + yeniden
+   gir" ile çift girilmiş Kasa kayıtlarıdır. */
+function linkSayimTransactions(counts, transactions) {
+  const sayimTx = (transactions || []).filter(t => t.category === SAYIM_TX_CATEGORY && t.type === "gelir");
+  const byId = new Map(sayimTx.map(t => [t.id, t]));
+  const used = new Set();
+  const link = new Map();
+  (counts || []).forEach(c => {
+    if (c.txId && byId.has(c.txId) && !used.has(c.txId)) {
+      link.set(c.id, byId.get(c.txId));
+      used.add(c.txId);
+    }
+  });
+  const legacy = (counts || []).filter(c => !c.txId && !link.has(c.id) && c.accountId);
+  const claim = matcher => legacy.forEach(c => {
+    if (link.has(c.id)) return;
+    const t = sayimTx.find(t => !used.has(t.id) && !t.countId && t.date === c.date && t.accountId === c.accountId && matcher(t, c));
+    if (t) {
+      link.set(c.id, t);
+      used.add(t.id);
+    }
+  });
+  claim((t, c) => Number(t.amount) === Number(c.kasa));
+  claim(() => true);
+  const orphanTx = sayimTx.filter(t => !used.has(t.id));
+  return { link, orphanTx };
+}
 function GunlukSayim({
   counts,
   addCount,
@@ -2784,11 +3154,71 @@ function GunlukSayim({
   removeCount,
   accounts,
   addTx,
+  editTx,
+  removeTx,
+  transactions = [],
   girisOnly = false
 }) {
   const [open, setOpen] = useState(girisOnly);
   const [editingId, setEditingId] = useState(null);
   const defaultAcc = accounts.find(a => a.name.toLowerCase().includes("eczane"))?.id || accounts[0]?.id || "";
+  const sayimLinks = useMemo(() => linkSayimTransactions(counts, transactions), [counts, transactions]);
+  /* Sayım ile Kasa arasındaki tutarsızlıklar: işlenmemiş sayımlar, Kasa'daki
+     tutarı/tarihi/hesabı sayımla uyuşmayanlar ve hiçbir sayıma bağlı olmayan
+     (silinmiş ya da çift girilmiş) Kasa kayıtları. */
+  const sayimSorunlari = useMemo(() => {
+    const list = [];
+    counts.forEach(c => {
+      const t = sayimLinks.link.get(c.id);
+      const bekler = sayimBeklerKasa(c);
+      if (bekler && !t) list.push({ kind: "eksik", count: c });
+      else if (!bekler && t) list.push({ kind: "fazla", count: c, tx: t });
+      else if (bekler && t && (Number(t.amount) !== Number(c.kasa) || t.date !== c.date || t.accountId !== c.accountId)) list.push({ kind: "farkli", count: c, tx: t });
+    });
+    sayimLinks.orphanTx.forEach(t => list.push({ kind: "sahipsiz", tx: t }));
+    return list;
+  }, [counts, sayimLinks]);
+  const sayimTxPayload = c => ({
+    accountId: c.accountId,
+    type: "gelir",
+    date: c.date,
+    category: SAYIM_TX_CATEGORY,
+    description: c.note || "Günlük sayım",
+    amount: Number(c.kasa) || 0
+  });
+  /* Bir sayımın Kasa kaydını sayıma göre günceller/oluşturur/siler ve
+     bağlantıyı (txId/countId) kurar. Hem kaydetmede hem "Düzelt"te kullanılır. */
+  const syncCountToKasa = (c, linked) => {
+    let txId = linked ? linked.id : null;
+    if (sayimBeklerKasa(c)) {
+      if (linked) {
+        editTx(linked.id, { ...sayimTxPayload(c), countId: c.id });
+      } else {
+        txId = uid();
+        addTx({ id: txId, ...sayimTxPayload(c), countId: c.id, tags: [] });
+      }
+    } else if (linked) {
+      removeTx(linked.id);
+      txId = null;
+    }
+    return txId;
+  };
+  const fixSorun = s => {
+    if (s.kind === "sahipsiz") {
+      removeTx(s.tx.id);
+      return;
+    }
+    const txId = syncCountToKasa(s.count, s.tx || null);
+    if (s.count.txId !== txId) editCount(s.count.id, { txId });
+  };
+  const fixAllCountSorunlari = () => {
+    sayimSorunlari.filter(s => s.kind !== "sahipsiz").forEach(fixSorun);
+  };
+  const deleteCount = c => {
+    const linked = sayimLinks.link.get(c.id);
+    if (linked) removeTx(linked.id);
+    removeCount(c.id);
+  };
   const [form, setForm] = useState({
     date: todayStr(),
     kasa: "",
@@ -2809,7 +3239,8 @@ function GunlukSayim({
       pos: c.pos ?? "",
       eft: c.eft ?? "",
       note: c.note || "",
-      accountId: c.accountId || defaultAcc
+      // null = kullanıcı bilerek "Hiçbiri" seçmiş; alan hiç yoksa (çok eski kayıt) varsayılan hesap
+      accountId: c.accountId === undefined ? defaultAcc : c.accountId || ""
     });
     setOpen(true);
   };
@@ -2817,41 +3248,26 @@ function GunlukSayim({
   const submit = e => {
     e.preventDefault();
     if (!form.kasa && !form.paper && !form.coin && !form.pos && !form.eft) return;
+    const fields = {
+      date: form.date,
+      note: form.note,
+      accountId: form.accountId || null,
+      kasa: Number(form.kasa) || 0,
+      paper: Number(form.paper) || 0,
+      coin: Number(form.coin) || 0,
+      pos: Number(form.pos) || 0,
+      eft: Number(form.eft) || 0
+    };
     if (editingId) {
-      editCount(editingId, {
-        date: form.date,
-        note: form.note,
-        accountId: form.accountId || null,
-        kasa: Number(form.kasa) || 0,
-        paper: Number(form.paper) || 0,
-        coin: Number(form.coin) || 0,
-        pos: Number(form.pos) || 0,
-        eft: Number(form.eft) || 0
-      });
+      // Düzenlemede Kasa kaydı da güncellenir (yoksa oluşturulur, Kasa tutarı
+      // sıfırlandıysa/hesap kaldırıldıysa silinir).
+      const linked = sayimLinks.link.get(editingId) || null;
+      const txId = syncCountToKasa({ id: editingId, ...fields }, linked);
+      editCount(editingId, { ...fields, txId });
     } else {
-      addCount({
-        id: uid(),
-        date: form.date,
-        note: form.note,
-        accountId: form.accountId || null,
-        kasa: Number(form.kasa) || 0,
-        paper: Number(form.paper) || 0,
-        coin: Number(form.coin) || 0,
-        pos: Number(form.pos) || 0,
-        eft: Number(form.eft) || 0
-      });
-      if (form.accountId && Number(form.kasa) > 0) {
-        addTx({
-          id: uid(),
-          accountId: form.accountId,
-          type: "gelir",
-          date: form.date,
-          category: "Günlük Kasa Sayımı",
-          description: form.note || "Günlük sayım",
-          amount: Number(form.kasa),
-          tags: []
-        });
-      }
+      const countId = uid();
+      const txId = syncCountToKasa({ id: countId, ...fields }, null);
+      addCount({ id: countId, ...fields, txId });
     }
     setForm({
       date: todayStr(),
@@ -2871,6 +3287,138 @@ function GunlukSayim({
   const todayEntry = counts.find(c => c.date === todayD);
   const thisMonth = todayD.slice(0, 7);
   const monthTotal = counts.filter(c => c.date.slice(0, 7) === thisMonth).reduce((s, c) => s + (c.kasa || 0) + (c.pos || 0) + (c.eft || 0), 0);
+  const accName = id => accounts.find(a => a.id === id)?.name || "hesap";
+  const sorunMetni = s => {
+    if (s.kind === "eksik") return {
+      title: `${fmtDate(s.count.date)} sayımı Kasa'ya işlenmemiş`,
+      detail: `${fmt(s.count.kasa)} ${accName(s.count.accountId)} hesabına gelir olarak işlenmeli.`,
+      action: "Kasa'ya işle"
+    };
+    if (s.kind === "farkli") return {
+      title: `${fmtDate(s.count.date)} sayımı ile Kasa kaydı uyuşmuyor`,
+      detail: `Sayım: ${fmt(s.count.kasa)} · Kasa'daki kayıt: ${fmt(s.tx.amount)} (${fmtDate(s.tx.date)}, ${accName(s.tx.accountId)})`,
+      action: "Sayıma göre düzelt"
+    };
+    if (s.kind === "fazla") return {
+      title: `${fmtDate(s.count.date)} sayımının Kasa'da fazladan kaydı var`,
+      detail: `Sayımda Kasa tutarı yok ya da hesap seçilmemiş, ama Kasa'da ${fmt(s.tx.amount)} gelir kaydı duruyor.`,
+      action: "Kasa kaydını sil"
+    };
+    return {
+      title: `Sayımı olmayan Kasa kaydı: ${fmtDate(s.tx.date)} · ${fmt(s.tx.amount)}`,
+      detail: `${accName(s.tx.accountId)} hesabında, hiçbir sayıma bağlı olmayan "Günlük Kasa Sayımı" geliri. Silinmiş bir sayımdan kalmış ya da aynı gün iki kez girilmiş olabilir.`,
+      action: "Kasa'dan sil"
+    };
+  };
+  const countSorunSayisi = sayimSorunlari.filter(s => s.kind !== "sahipsiz").length;
+  const sorunPanelEl = sayimSorunlari.length > 0 && /*#__PURE__*/React.createElement("div", {
+    className: "fadein",
+    style: {
+      background: C.card,
+      borderRadius: 18,
+      padding: 18,
+      display: "flex",
+      flexDirection: "column",
+      gap: 12,
+      boxShadow: `inset 0 0 0 1px ${C.amber}`
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: 12,
+      flexWrap: "wrap"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 10
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      display: "flex",
+      background: C.amberSoft,
+      color: C.amber,
+      borderRadius: 8,
+      padding: 7
+    }
+  }, /*#__PURE__*/React.createElement(AlertTriangle, {
+    size: 16
+  })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontWeight: 700,
+      fontSize: 14,
+      color: C.ink
+    }
+  }, "Sayım ile Kasa arasında ", sayimSorunlari.length, " uyuşmazlık var"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: C.muted,
+      marginTop: 2
+    }
+  }, "Kasa bakiyesinin doğru olması için her birini kontrol edip düzelt."))), countSorunSayisi > 1 && /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    onClick: fixAllCountSorunlari,
+    style: {
+      background: C.accent,
+      color: "#fff",
+      border: "none",
+      borderRadius: 6,
+      padding: "8px 12px",
+      fontSize: 12,
+      fontWeight: 600,
+      cursor: "pointer"
+    }
+  }, "Sayımlara göre tümünü düzelt (", countSorunSayisi, ")")), sayimSorunlari.map(s => {
+    const m = sorunMetni(s);
+    const destructive = s.kind === "sahipsiz" || s.kind === "fazla";
+    return /*#__PURE__*/React.createElement("div", {
+      key: s.kind + (s.count ? s.count.id : "") + (s.tx ? s.tx.id : ""),
+      style: {
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: 12,
+        background: C.paper,
+        borderRadius: 10,
+        padding: "10px 14px",
+        flexWrap: "wrap"
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        minWidth: 0,
+        flex: "1 1 260px"
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 13,
+        fontWeight: 600,
+        color: C.ink
+      }
+    }, m.title), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 12,
+        color: C.muted,
+        marginTop: 2
+      }
+    }, m.detail)), /*#__PURE__*/React.createElement("button", {
+      type: "button",
+      onClick: () => fixSorun(s),
+      style: {
+        background: destructive ? C.redSoft : C.card,
+        color: destructive ? C.red : C.ink,
+        border: `1px solid ${destructive ? "transparent" : C.line}`,
+        borderRadius: 6,
+        padding: "7px 12px",
+        fontSize: 12,
+        fontWeight: 600,
+        cursor: "pointer",
+        whiteSpace: "nowrap"
+      }
+    }, m.action));
+  }));
   return /*#__PURE__*/React.createElement("div", {
     className: "fadein",
     style: {
@@ -2915,7 +3463,7 @@ function GunlukSayim({
     label: "Son Sayım",
     value: sorted[0] ? fmtDate(sorted[0].date) : "—",
     accent: C.amber
-  })), !girisOnly && /*#__PURE__*/React.createElement("div", {
+  })), !girisOnly && sorunPanelEl, !girisOnly && /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       justifyContent: "flex-end"
@@ -3189,8 +3737,8 @@ function GunlukSayim({
   }, /*#__PURE__*/React.createElement(Pencil, {
     size: 14
   })), /*#__PURE__*/React.createElement("button", {
-    onClick: () => removeCount(c.id),
-    title: "Sil",
+    onClick: () => deleteCount(c),
+    title: "Sil (Kasa'ya işlenmiş gelir kaydı da silinir)",
     style: {
       background: "none",
       border: "none",
@@ -3299,6 +3847,9 @@ function KasaBankalarView({
     removeCount: removeCount,
     accounts: accounts,
     addTx: addTx,
+    editTx: editTx,
+    removeTx: removeTx,
+    transactions: transactions,
     girisOnly: girisOnly
   }));
 }
@@ -3315,10 +3866,11 @@ function paymentBadgeStyle(status) {
   if (status === "kismi") return { bg: C.amberSoft, fg: C.amber, label: "Kısmi Ödendi", Icon: Clock };
   return { bg: C.redSoft, fg: C.red, label: "Bekliyor", Icon: Clock };
 }
-function PaymentStatusCell({ t, isExpanded, onToggle }) {
-  const status = paymentStatusOf(t);
+function PaymentStatusCell({ t, isExpanded, onToggle, mahsup = 0 }) {
+  const paidEff = paidAmountOf(t) + mahsup;
+  const status = paidEff <= 0 ? "bekliyor" : paidEff < Number(t.amount || 0) ? "kismi" : "odendi";
   const cfg = paymentBadgeStyle(status);
-  const kalan = kalanOf(t);
+  const kalan = Math.max(0, kalanOf(t) - mahsup);
   return /*#__PURE__*/React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 3, alignItems: "flex-start" } },
     /*#__PURE__*/React.createElement("button", {
       onClick: onToggle,
@@ -3329,13 +3881,15 @@ function PaymentStatusCell({ t, isExpanded, onToggle }) {
         background: cfg.bg, color: cfg.fg
       }
     }, /*#__PURE__*/React.createElement(cfg.Icon, { size: 12 }), " ", cfg.label, " ", isExpanded ? /*#__PURE__*/React.createElement(ChevronUp, { size: 11 }) : /*#__PURE__*/React.createElement(ChevronDown, { size: 11 })),
-    status === "kismi" && /*#__PURE__*/React.createElement("span", { className: "ecz-mono", style: { fontSize: 10.5, color: C.muted } }, "Kalan: ", fmt(kalan))
+    status === "kismi" && /*#__PURE__*/React.createElement("span", { className: "ecz-mono", style: { fontSize: 10.5, color: C.muted } }, "Kalan: ", fmt(kalan)),
+    mahsup > 0 && /*#__PURE__*/React.createElement("span", { className: "ecz-mono", style: { fontSize: 10.5, color: C.muted } }, "Avanstan düşülen: ", fmt(mahsup))
   );
 }
-function PaymentHistoryDetail({ t, editTx, accounts, colSpan }) {
+function PaymentHistoryDetail({ t, editTx, accounts, colSpan, mahsup = 0 }) {
+  const kalanEff = () => Math.max(0, kalanOf(t) - mahsup);
   const [payForm, setPayForm] = useState({
     date: todayStr(),
-    amount: kalanOf(t) > 0 ? String(kalanOf(t)) : "",
+    amount: kalanEff() > 0 ? String(kalanEff()) : "",
     paymentMethod: "hesaptan",
     accountId: accounts[0]?.id || ""
   });
@@ -3343,7 +3897,7 @@ function PaymentHistoryDetail({ t, editTx, accounts, colSpan }) {
   const submitPayment = e => {
     e.preventDefault();
     if (!payForm.amount || Number(payForm.amount) <= 0) return;
-    const kalanTutar = kalanOf(t);
+    const kalanTutar = kalanEff();
     if (Number(payForm.amount) > kalanTutar) {
       alert(`Girilen tutar (${fmt(Number(payForm.amount))}) kalan borçtan (${fmt(kalanTutar)}) fazla. Lütfen kalan tutarı aşmayacak bir miktar gir.`);
       return;
@@ -3363,11 +3917,14 @@ function PaymentHistoryDetail({ t, editTx, accounts, colSpan }) {
   const removePayment = pid => {
     editTx(t.id, { payments: (t.payments || []).filter(p => p.id !== pid) });
   };
-  const kalan = kalanOf(t);
+  const kalan = kalanEff();
   return /*#__PURE__*/React.createElement("tr", null,
     /*#__PURE__*/React.createElement("td", { colSpan: colSpan, style: { padding: "4px 16px 16px", background: C.paper } },
       /*#__PURE__*/React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 10 } },
-        payments.length === 0 ? /*#__PURE__*/React.createElement("div", { style: { fontSize: 12.5, color: C.muted } }, "Bu kayıt için henüz ödeme girilmedi.") :
+        mahsup > 0 && /*#__PURE__*/React.createElement("div", { style: { fontSize: 12.5, color: C.muted, padding: "6px 0", borderBottom: `1px solid ${C.paperDark}` } },
+          "Avans / ara ödemelerden düşülen: ", /*#__PURE__*/React.createElement("b", { className: "ecz-mono", style: { color: C.ink } }, fmt(mahsup)),
+          " (parası avans verilirken hesaptan çıktı, burada tekrar düşülmez)"),
+        payments.length === 0 && mahsup > 0 ? null : payments.length === 0 ? /*#__PURE__*/React.createElement("div", { style: { fontSize: 12.5, color: C.muted } }, "Bu kayıt için henüz ödeme girilmedi.") :
           /*#__PURE__*/React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 4 } },
             payments.map(p => /*#__PURE__*/React.createElement("div", {
               key: p.id,
@@ -4527,6 +5084,7 @@ function CalisanMaaslari({
   const [openPayForm, setOpenPayForm] = useState(false);
   const [editingPayId, setEditingPayId] = useState(null);
   const blankPayForm = {
+    kind: "maas",
     date: todayStr(),
     dueDate: todayStr(),
     amount: "",
@@ -4542,13 +5100,15 @@ function CalisanMaaslari({
     setEditingPayId(p.id);
     setActiveEmp(p.employeeId);
     setExpandedId(null);
+    const firstPay = (p.payments || [])[0];
     setPayForm({
+      kind: isMaasAvans(p) ? "avans" : "maas",
       date: p.date || todayStr(),
       dueDate: p.dueDate || p.date || todayStr(),
       amount: p.amount ?? "",
       status: "bekliyor",
-      paymentMethod: "hesaptan",
-      accountId: accounts[0]?.id || "",
+      paymentMethod: firstPay && firstPay.paymentMethod === "elden" ? "elden" : "hesaptan",
+      accountId: firstPay && firstPay.accountId || accounts[0]?.id || "",
       recurring: false,
       freqType: "monthly",
       intervalDays: "30"
@@ -4561,13 +5121,16 @@ function CalisanMaaslari({
      sadece burada gerçekten var olan bir kayıt varsa (elle ya da aşağıdaki
      tekrarlama şablonuyla oluşturulmuş) borç/kalan hesaba katılır. */
   const maasKayitlari = transactions.filter(t => t.type === "gider" && t.giderTuru === "maas");
+  // Avans / ara ödemeler, çalışanın ödenmemiş maaşından düşülür (bkz. maasMahsupHesapla).
+  const mh = useMemo(() => maasMahsupHesapla(transactions), [transactions]);
   const totalPayroll = employees.reduce((s, e) => s + Number(e.salary || 0), 0);
   const totalPaid = maasKayitlari.reduce((s, t) => s + paidAmountOf(t), 0);
-  const totalKalan = maasKayitlari.reduce((s, t) => s + kalanOf(t), 0);
+  const totalKalan = maasKayitlari.reduce((s, t) => s + maasKalanOf(t, mh), 0);
   const activeEmpObj = employees.find(e => e.id === activeEmp) || null;
   const empKayitlari = activeEmp ? [...maasKayitlari].filter(t => t.employeeId === activeEmp).sort((a, b) => new Date(b.date) - new Date(a.date)) : [];
-  const empKalanToplam = empKayitlari.reduce((s, t) => s + kalanOf(t), 0);
-  const empGecikmisToplam = empKayitlari.filter(t => (t.dueDate || t.date) < todayStr()).reduce((s, t) => s + kalanOf(t), 0);
+  const empKalanToplam = empKayitlari.reduce((s, t) => s + maasKalanOf(t, mh), 0);
+  const empGecikmisToplam = empKayitlari.filter(t => (t.dueDate || t.date) < todayStr()).reduce((s, t) => s + maasKalanOf(t, mh), 0);
+  const empAvansBakiye = activeEmp ? mh.avansBakiye[activeEmp] || 0 : 0;
   const empOdenenToplam = empKayitlari.reduce((s, t) => s + paidAmountOf(t), 0);
   const myTemplates = (recurringTemplates || []).filter(rt => rt.kind === "maas" && rt.employeeId === activeEmp);
   const submitEmp = e => {
@@ -4592,6 +5155,42 @@ function CalisanMaaslari({
   const submitPay = e => {
     e.preventDefault();
     if (!activeEmp || !payForm.amount) return;
+    if (payForm.kind === "avans") {
+      /* Avans / ara ödeme: her zaman ödenmiş bir kayıt — para bir kez hesaptan
+         (ya da elden) çıkar, tutar çalışanın bekleyen maaşından düşülür. */
+      if (payForm.paymentMethod === "hesaptan" && !payForm.accountId) {
+        alert("Avansın hangi kasa/banka hesabından ödendiğini seç ya da 'Elden' seçeneğini kullan.");
+        return;
+      }
+      const acc = payForm.paymentMethod === "hesaptan" ? accounts.find(a => a.id === payForm.accountId) : null;
+      const existing = editingPayId ? transactions.find(t => t.id === editingPayId) : null;
+      const firstPayId = existing && (existing.payments || [])[0] ? existing.payments[0].id : uid();
+      const avansPayload = {
+        type: "gider",
+        giderTuru: "maas",
+        maasTuru: "avans",
+        employeeId: activeEmp,
+        date: payForm.date,
+        dueDate: payForm.date,
+        amount: Number(payForm.amount),
+        category: "Maaş Avansı",
+        description: `${activeEmpObj?.name || ""} — avans / ara ödeme (${fmtDate(payForm.date)})`,
+        payments: [{
+          id: firstPayId,
+          date: payForm.date,
+          amount: Number(payForm.amount),
+          paymentMethod: payForm.paymentMethod,
+          accountId: payForm.paymentMethod === "hesaptan" ? payForm.accountId : null,
+          accountName: acc ? acc.bankName || acc.name : null
+        }]
+      };
+      if (existing) editTx(editingPayId, { ...avansPayload, recurringTemplateId: existing.recurringTemplateId || null });
+      else addTx({ id: uid(), ...avansPayload, recurringTemplateId: null });
+      setPayForm({ ...blankPayForm, accountId: payForm.accountId });
+      setEditingPayId(null);
+      setOpenPayForm(false);
+      return;
+    }
     if (payForm.status === "odendi" && payForm.paymentMethod === "hesaptan" && !payForm.accountId) {
       alert("Hesaptan ödendi seçtin ama hangi kasa/banka hesabından düşüleceğini seçmedin. Lütfen bir hesap seç ya da 'Elden' ödeme seçeneğini kullan.");
       return;
@@ -4608,7 +5207,8 @@ function CalisanMaaslari({
       description: `${activeEmpObj?.name || ""} — ${fmtDate(payForm.date)}`
     };
     if (editingPayId) {
-      editTx(editingPayId, payload);
+      // Avanstan maaşa geri çevrilirse avans işareti kaldırılır (ödemeleri korunur).
+      editTx(editingPayId, { ...payload, maasTuru: null });
     } else {
       let templateId = null;
       if (payForm.recurring) {
@@ -4707,8 +5307,9 @@ function CalisanMaaslari({
   const employeeRows = employees.map(emp => {
     const isActive = activeEmp === emp.id;
     const empRecs = maasKayitlari.filter(t => t.employeeId === emp.id);
-    const kalan = empRecs.reduce((s, t) => s + kalanOf(t), 0);
-    const gecikmis = empRecs.filter(t => (t.dueDate || t.date) < todayStr()).reduce((s, t) => s + kalanOf(t), 0);
+    const kalan = empRecs.reduce((s, t) => s + maasKalanOf(t, mh), 0);
+    const gecikmis = empRecs.filter(t => (t.dueDate || t.date) < todayStr()).reduce((s, t) => s + maasKalanOf(t, mh), 0);
+    const avansB = mh.avansBakiye[emp.id] || 0;
     const badgeEl = gecikmis > 0
       ? React.createElement("span", {
           style: { display: "inline-block", marginTop: 6, fontSize: 11, fontWeight: 700, padding: "3px 8px", borderRadius: 20, background: isActive ? "rgba(0,0,0,0.32)" : C.redSoft, color: isActive ? "#fff" : C.red }
@@ -4744,7 +5345,10 @@ function CalisanMaaslari({
       ),
       emp.position ? React.createElement("div", { style: { fontSize: 12, color: isActive ? "#ffffff99" : C.muted, marginTop: 3 } }, emp.position) : null,
       React.createElement("div", { className: "ecz-mono", style: { marginTop: 6, fontSize: 13, fontWeight: 600 } }, fmt(emp.salary), " / ay"),
-      badgeEl
+      badgeEl,
+      avansB > 0 ? React.createElement("span", {
+        style: { display: "inline-block", marginTop: 6, marginLeft: badgeEl ? 6 : 0, fontSize: 11, fontWeight: 700, padding: "3px 8px", borderRadius: 20, background: isActive ? "rgba(255,255,255,0.92)" : C.paperDark, color: C.ink }
+      }, "Avans: ", fmt(avansB)) : null
     );
   });
 
@@ -4756,7 +5360,8 @@ function CalisanMaaslari({
   },
     React.createElement("span", null, "Toplam ödenen: ", React.createElement("b", { className: "ecz-mono", style: { color: C.green } }, fmt(empOdenenToplam))),
     React.createElement("span", null, "Bekleyen: ", React.createElement("b", { className: "ecz-mono", style: { color: empKalanToplam > 0 ? C.amber : C.green } }, fmt(empKalanToplam))),
-    empGecikmisToplam > 0 ? React.createElement("span", null, "Gecikmiş: ", React.createElement("b", { className: "ecz-mono", style: { color: C.red } }, fmt(empGecikmisToplam))) : null
+    empGecikmisToplam > 0 ? React.createElement("span", null, "Gecikmiş: ", React.createElement("b", { className: "ecz-mono", style: { color: C.red } }, fmt(empGecikmisToplam))) : null,
+    empAvansBakiye > 0 ? React.createElement("span", { title: "Henüz bir maaş kaydından düşülmemiş avans. Bir sonraki maaş kaydı oluşunca otomatik düşülür." }, "Sonraki maaştan düşülecek avans: ", React.createElement("b", { className: "ecz-mono", style: { color: C.ink } }, fmt(empAvansBakiye))) : null
   );
 
   const togglePayFormButtonEl = React.createElement("div", { style: { display: "flex", justifyContent: "flex-end", marginBottom: 12 } },
@@ -4775,10 +5380,34 @@ function CalisanMaaslari({
     },
       openPayForm ? React.createElement(X, { size: 15 }) : React.createElement(Plus, { size: 15 }),
       " ",
-      openPayForm ? "Kapat" : "Yeni Maaş / Prim"
+      openPayForm ? "Kapat" : "Yeni Maaş / Prim / Avans"
     )
   );
 
+  /* Kayıt türü: normal maaş/prim hakedişi mi, yoksa dönem arasında yapılan
+     avans / ara ödeme mi. Avansa geçince tutar alanı boşaltılır (varsayılan
+     olarak dolu gelen aylık maaş tutarı yanlışlıkla avans yazılmasın). */
+  const setPayKind = kind => {
+    if (kind === payForm.kind) return;
+    setPayForm({
+      ...payForm,
+      kind,
+      amount: !editingPayId && kind === "avans" && String(payForm.amount) === String(activeEmpObj?.salary ?? "") ? "" : payForm.amount
+    });
+  };
+  const payKindToggleEl = React.createElement("div", { style: { display: "flex", gap: 8 } },
+    [["maas", "Maaş / Prim (hakediş)"], ["avans", "Avans / Ara Ödeme"]].map(([k, lbl]) => React.createElement("button", {
+      key: k,
+      type: "button",
+      onClick: () => setPayKind(k),
+      style: {
+        flex: 1, padding: "8px 12px", borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: "pointer",
+        border: `1px solid ${payForm.kind === k ? C.ink : C.line}`,
+        background: payForm.kind === k ? C.ink : C.card,
+        color: payForm.kind === k ? C.paper : C.text
+      }
+    }, lbl))
+  );
   const recurringFieldsEl = !payForm.recurring ? null : React.createElement("div", {
     style: { display: "grid", gridTemplateColumns: payForm.freqType === "custom" ? "160px 160px" : "160px", gap: 10 }
   },
@@ -4792,7 +5421,7 @@ function CalisanMaaslari({
     }) : null
   );
 
-  const recurringToggleEl = !editingPayId ? React.createElement("div", {
+  const recurringToggleEl = !editingPayId && payForm.kind !== "avans" ? React.createElement("div", {
     style: { display: "flex", flexDirection: "column", gap: 10, background: C.paperDark, borderRadius: 10, padding: 12 }
   },
     React.createElement("label", { style: { display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 600, cursor: "pointer" } },
@@ -4804,7 +5433,7 @@ function CalisanMaaslari({
     payForm.recurring ? React.createElement("div", { style: { fontSize: 11.5, color: C.muted } }, "Şablon kurulduğu andan itibaren ileriye doğru kayıt üretir — geçmişe gidip önceki dönemler için borç oluşturmaz.") : null
   ) : null;
 
-  const paymentMethodFieldsEl = payForm.status !== "odendi" ? null : React.createElement("div", {
+  const paymentMethodFieldsEl = payForm.status !== "odendi" && payForm.kind !== "avans" ? null : React.createElement("div", {
     style: { display: "grid", gridTemplateColumns: payForm.paymentMethod === "hesaptan" ? "160px 1fr" : "160px", gap: 10 }
   },
     React.createElement("select", { style: inputStyle, value: payForm.paymentMethod, onChange: e => setPayForm({ ...payForm, paymentMethod: e.target.value }) },
@@ -4824,18 +5453,22 @@ function CalisanMaaslari({
     className: "fadein",
     style: { display: "flex", flexDirection: "column", gap: 10, marginBottom: 18, background: C.paper, borderRadius: 10, padding: 14 }
   },
+    payKindToggleEl,
+    payForm.kind === "avans" ? React.createElement("div", { style: { fontSize: 12, color: C.muted, lineHeight: 1.45 } },
+      "Dönem arasında çalışana yapılan ödeme. Kasa/Banka'dan şimdi düşülür ve çalışanın ödenmemiş maaşından (henüz maaş kaydı yoksa bir sonraki maaştan) otomatik olarak düşülür — maaş kaydına ayrıca ödeme girmene gerek yok."
+    ) : null,
     React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(140px,1fr))", gap: 10 } },
-      React.createElement(Field, { label: "Hakediş Tarihi" },
+      React.createElement(Field, { label: payForm.kind === "avans" ? "Ödeme Tarihi" : "Hakediş Tarihi" },
         React.createElement("input", { type: "date", style: inputStyle, value: payForm.date, onChange: e => setPayForm({ ...payForm, date: e.target.value }) })
       ),
-      React.createElement(Field, { label: "Ödeneceği Tarih" },
+      payForm.kind === "avans" ? null : React.createElement(Field, { label: "Ödeneceği Tarih" },
         React.createElement("input", { type: "date", style: inputStyle, value: payForm.dueDate, onChange: e => setPayForm({ ...payForm, dueDate: e.target.value }) })
       ),
-      React.createElement(Field, { label: "Toplam Tutar (₺)" },
+      React.createElement(Field, { label: payForm.kind === "avans" ? "Ödenen Tutar (₺)" : "Toplam Tutar (₺)" },
         React.createElement(TutarInput, { style: inputStyle, value: payForm.amount, onChange: e => setPayForm({ ...payForm, amount: e.target.value }) })
       )
     ),
-    React.createElement(Field, { label: "Ödeme Durumu" },
+    payForm.kind === "avans" ? null : React.createElement(Field, { label: "Ödeme Durumu" },
       React.createElement("div", { style: { display: "flex", gap: 8 } },
         ["bekliyor", "odendi"].map(st => React.createElement("button", {
           key: st,
@@ -4884,10 +5517,13 @@ function CalisanMaaslari({
       React.createElement("td", { style: tdStyle }, t.dueDate && t.dueDate !== t.date ? fmtDate(t.dueDate) : "—"),
       React.createElement("td", { className: "ecz-mono", style: { padding: "10px 16px", fontWeight: 600 } },
         fmt(t.amount), " ",
-        t.recurringTemplateId ? React.createElement(RotateCcw, { size: 12, color: C.muted, style: { marginLeft: 4, verticalAlign: "middle" } }) : null
+        t.recurringTemplateId ? React.createElement(RotateCcw, { size: 12, color: C.muted, style: { marginLeft: 4, verticalAlign: "middle" } }) : null,
+        isMaasAvans(t) ? React.createElement("span", {
+          style: { marginLeft: 6, fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 20, background: C.paperDark, color: C.ink, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif", verticalAlign: "middle" }
+        }, "Avans / ara ödeme") : null
       ),
       React.createElement("td", { style: { padding: "10px 16px" } },
-        React.createElement(PaymentStatusCell, { t: t, isExpanded: expandedId === t.id, onToggle: () => setExpandedId(expandedId === t.id ? null : t.id) })
+        React.createElement(PaymentStatusCell, { t: t, mahsup: mh.mahsup.get(t.id) || 0, isExpanded: expandedId === t.id, onToggle: () => setExpandedId(expandedId === t.id ? null : t.id) })
       ),
       React.createElement("td", { style: { padding: "10px 16px", textAlign: "right", whiteSpace: "nowrap" } },
         React.createElement("button", {
@@ -4900,7 +5536,7 @@ function CalisanMaaslari({
         }, React.createElement(Trash2, { size: 13 }))
       )
     ),
-    expandedId === t.id ? React.createElement(PaymentHistoryDetail, { t: t, editTx: editTx, accounts: accounts, colSpan: 5 }) : null
+    expandedId === t.id ? React.createElement(PaymentHistoryDetail, { key: t.id + ":" + (mh.mahsup.get(t.id) || 0), t: t, editTx: editTx, accounts: accounts, colSpan: 5, mahsup: mh.mahsup.get(t.id) || 0 }) : null
   ));
 
   const kayitTableEl = empKayitlari.length === 0 ? React.createElement(EmptyState, { text: "Bu çalışan için maaş/prim kaydı yok." }) : React.createElement("table", {
@@ -9581,7 +10217,7 @@ function App() {
                ileri gider) — çalışanın işe giriş tarihine bakılmaz, geçmişe
                gidip eski dönemler için borç icat edilmez. */
             genTx.push({
-              id: uid(),
+              id: `rec-${tpl.id}-${next}`,
               type: "gider",
               giderTuru: "maas",
               employeeId: tpl.employeeId,
@@ -9595,7 +10231,7 @@ function App() {
             });
           } else {
             genTx.push({
-              id: uid(),
+              id: `rec-${tpl.id}-${next}`,
               type: tpl.kind,
               [tpl.kind === "gider" ? "giderTuru" : "gelirTuru"]: "genel",
               category: tpl.category,
@@ -10386,7 +11022,7 @@ function App() {
         ...s,
         status: status
       } : s) : [...prev, {
-        id: uid(),
+        id: `ts-${templateId}-${month}`,
         templateId: templateId,
         month: month,
         status: status
@@ -10574,33 +11210,82 @@ function App() {
     fsTryReconnect();
     return unsub;
   }, []);
-  // Masaüstü uygulamasında (Tauri) başka bir cihazdan senkron dosyasına yazılan
-  // değişiklikler otomatik algılanır; bu değişikliği bu cihazın verisine uygular.
+  /* Senkron dosyasındaki veriyi bu cihazın verisiyle KAYIT KAYIT birleştirir
+     (bkz. syncMergeKey). Yerelde değişen veri türleri hem ekrana hem
+     localStorage'a yazılır — ama saveKey kullanılmaz, çünkü bu bir "yerel
+     değişiklik" değil, başka cihazdan gelen değişikliktir (zaman damgaları
+     olduğu gibi korunur, gereksiz geri yazma döngüsü oluşmaz). Döner:
+     { remoteBehind } — dosyada olmayan (bu cihaza ait) yenilik varsa true. */
+  const mergeRemoteObject = useCallback(async parsed => {
+    const data = parsed && parsed.data && typeof parsed.data === "object" ? parsed.data : parsed || {};
+    const remoteMeta = parsed && parsed.meta && typeof parsed.meta === "object" ? parsed.meta : {};
+    const setters = {
+      transactions: setTransactions,
+      suppliers: setSuppliers,
+      supplierTx: setSupplierTx,
+      prescriptions: setPrescriptions,
+      employees: setEmployees,
+      accounts: setAccounts,
+      tags: setTags,
+      counts: setCounts,
+      cards: setCards,
+      charges: setCharges,
+      deductions: setDeductions,
+      returns: setReturnsList,
+      leaves: setLeaves,
+      taskTemplates: setTaskTemplates,
+      taskStatuses: setTaskStatuses,
+      authUsers: setAuthUsers,
+      authSettings: setAuthSettingsState,
+      recurringTemplates: setRecurringTemplates
+    };
+    const meta = syncLoadMeta();
+    let remoteBehind = false;
+    Object.entries(SYNC_KEY_MAP).forEach(([field, storageKey]) => {
+      try {
+        if (!(field in data)) {
+          remoteBehind = true;
+          return;
+        }
+        const localVal = syncReadLocal(storageKey);
+        const res = syncMergeKey(localVal, meta.keys[storageKey], data[field], remoteMeta[field]);
+        if (res.remoteBehind) remoteBehind = true;
+        if (res.localChanged) {
+          // Güvenlik: kullanıcı listesi boşalacaksa ya da ayarlar bozuk geldiyse uygulama — kimse kilitli kalmasın.
+          if (field === "authUsers" && (!Array.isArray(res.value) || res.value.length === 0)) {
+            remoteBehind = true;
+            return;
+          }
+          if (field === "authSettings" && (!res.value || typeof res.value !== "object" || Array.isArray(res.value))) {
+            remoteBehind = true;
+            return;
+          }
+          localStorage.setItem(storageKey, JSON.stringify(res.value));
+          setters[field](res.value);
+        }
+        meta.keys[storageKey] = res.km;
+      } catch (e) {
+        console.error("sync merge error", field, e);
+      }
+    });
+    syncSaveMeta();
+    return { remoteBehind };
+  }, []);
   useEffect(() => {
-    fsSetApplyRemoteHandler(importDataObject);
+    fsSetApplyRemoteHandler(mergeRemoteObject);
     return () => fsSetApplyRemoteHandler(null);
-  }, [importDataObject]);
+  }, [mergeRemoteObject]);
+  /* Bağlanırken artık "dosyadakini mi yükleyeyim / bu cihazdakini mi yazayım"
+     diye sorulmuyor: iki taraf kayıt kayıt birleştiriliyor, hiçbir tarafın
+     verisi ezilmiyor. */
   const handleSyncConnect = useCallback(async () => {
     const result = await fsConnect();
     if (!result) return;
+    await fsSyncNow();
     if (result.existingText) {
-      const useExisting = window.confirm("Seçtiğin dosyada zaten pharmafin verisi var.\n\nTamam: dosyadaki veriyi bu cihaza yükle.\nİptal: bu cihazdaki mevcut veriyi dosyanın üzerine yaz.");
-      if (useExisting) {
-        try {
-          const parsed = JSON.parse(result.existingText);
-          await importDataObject(parsed.data || parsed);
-        } catch (err) {
-          console.error(err);
-          alert("Dosya okunamadı, geçerli bir pharmafin veri dosyası değil. Bu cihazdaki veriler dosyaya yazılacak.");
-          await fsWriteNow();
-        }
-      } else {
-        await fsWriteNow();
-      }
-    } else {
-      await fsWriteNow();
+      alert("Dosyadaki veriler bu cihazdaki verilerle kayıt kayıt birleştirildi.");
     }
-  }, [importDataObject]);
+  }, []);
   const handleSyncDisconnect = useCallback(async () => {
     if (window.confirm("Otomatik dosya senkronizasyonu kapatılsın mı? Dosyadaki veriler silinmez, sadece bağlantı kesilir.")) {
       await fsDisconnect();
@@ -10689,9 +11374,10 @@ function App() {
     // şablonuyla) maaş/prim kayıtlarının kalan tutarı hesaba katılır; işe
     // giriş tarihine bakılarak geçmişe dönük hiçbir ay icat edilmez.
     const maasKayitlariAll = transactions.filter(t => t.type === "gider" && t.giderTuru === "maas");
+    const maasMh = maasMahsupHesapla(transactions); // avans / ara ödemeler bekleyen maaştan düşülür
     const empArrearsMap = {};
     maasKayitlariAll.forEach(t => {
-      const kalan = kalanOf(t);
+      const kalan = maasKalanOf(t, maasMh);
       if (kalan > 0) empArrearsMap[t.employeeId] = (empArrearsMap[t.employeeId] || 0) + kalan;
     });
     const employeesWithArrears = Object.keys(empArrearsMap).length;

@@ -2106,6 +2106,7 @@ function Dashboard({
     suppliers.forEach(s => map[s.id] = 0);
     supplierTx.forEach(t => {
       if (!map[t.supplierId] && map[t.supplierId] !== 0) return;
+      if (t.type === "mahsup") return; // mahsup para hareketi değil
       map[t.supplierId] += t.type === "borç" ? Number(t.amount) : -Number(t.amount);
     });
     return map;
@@ -5881,37 +5882,37 @@ function GiderlerView({
 }
 
 /* ---------------- TEDARİKÇİLER ---------------- */
-/* Tedarikçi faturalarının (borç) ödeme durumu. Faturaya bağlı ödemeler
-   (ödeme.faturaId) önce kendi faturasını kapatır; faturaya bağlı olmayan
-   (eski/genel) ödemeler en eski açık faturadan başlayarak sırayla kapatır.
-   Döner: Map(faturaId -> { odenen, fifo, kalan }). */
+/* Tedarikçi faturalarının (borç) ödeme durumu (v1.1.17). Bir faturayı SADECE
+   ona bağlı kayıtlar kapatır: o fatura için yapılan ödemeler (ödeme.faturaId)
+   ve avanstan/genel ödemeden yapılan mahsuplar (type "mahsup", faturaId).
+   Faturaya bağlı olmayan ödemeler (ör. verilen avans çekleri) faturaları
+   kendiliğinden KAPATMAZ — "kullanılmamış avans" olarak bekler; kullanıcı
+   istediği faturaya "Avanstan düş" ile uygular. Mahsup kaydı para hareketi
+   değildir: tedarikçi bakiyesini ve Kasa/Banka'yı etkilemez.
+   Döner: { durum: Map(faturaId -> { odenen, mahsup, kalan }), avansBakiye }. */
 function tedarikciFaturaDurumlari(txs) {
-  const faturalar = txs.filter(t => t.type === "borç").sort((a, b) => String(a.date).localeCompare(String(b.date)) || String(a.id).localeCompare(String(b.id)));
+  const faturalar = txs.filter(t => t.type === "borç");
   const ids = new Set(faturalar.map(f => f.id));
   const bagli = {};
-  let havuz = 0;
-  txs.filter(t => t.type === "ödeme").forEach(o => {
-    if (o.faturaId && ids.has(o.faturaId)) bagli[o.faturaId] = (bagli[o.faturaId] || 0) + Number(o.amount || 0);
-    else havuz += Number(o.amount || 0);
-  });
-  const sonuc = new Map();
-  faturalar.forEach(f => {
-    const tutar = Number(f.amount || 0);
-    const b = bagli[f.id] || 0;
-    const odenen = Math.min(b, tutar);
-    havuz += Math.max(0, b - tutar);
-    sonuc.set(f.id, { odenen, fifo: 0, kalan: tutar - odenen });
-  });
-  faturalar.forEach(f => {
-    const d = sonuc.get(f.id);
-    const m = Math.round(Math.min(havuz, d.kalan) * 100) / 100;
-    if (m > 0) {
-      d.fifo = m;
-      d.kalan = Math.round((d.kalan - m) * 100) / 100;
-      havuz -= m;
+  const mahsup = {};
+  let serbest = 0;
+  txs.forEach(t => {
+    const bagliMi = t.faturaId && ids.has(t.faturaId);
+    if (t.type === "ödeme") {
+      if (bagliMi) bagli[t.faturaId] = (bagli[t.faturaId] || 0) + Number(t.amount || 0);else serbest += Number(t.amount || 0);
+    } else if (t.type === "mahsup" && bagliMi) {
+      mahsup[t.faturaId] = (mahsup[t.faturaId] || 0) + Number(t.amount || 0);
+      serbest -= Number(t.amount || 0);
     }
   });
-  return sonuc;
+  const durum = new Map();
+  faturalar.forEach(f => {
+    const tutar = Number(f.amount || 0);
+    const o = bagli[f.id] || 0;
+    const m = mahsup[f.id] || 0;
+    durum.set(f.id, { odenen: o, mahsup: m, kalan: Math.max(0, Math.round((tutar - o - m) * 100) / 100) });
+  });
+  return { durum, avansBakiye: Math.max(0, Math.round(serbest * 100) / 100) };
 }
 function SuppliersView({
   suppliers,
@@ -5967,7 +5968,7 @@ function SuppliersView({
       accountId: t.accountId || accounts[0]?.id || ""
     });
   };
-  const balanceOf = id => supplierTx.filter(t => t.supplierId === id).reduce((s, t) => s + (t.type === "borç" ? Number(t.amount) : -Number(t.amount)), 0);
+  const balanceOf = id => supplierTx.filter(t => t.supplierId === id && t.type !== "mahsup").reduce((s, t) => s + (t.type === "borç" ? Number(t.amount) : -Number(t.amount)), 0);
   const submitSupplier = e => {
     e.preventDefault();
     if (!supplierForm.name) return;
@@ -5988,7 +5989,7 @@ function SuppliersView({
     if (!txForm.amount || !activeSupplier) return;
     const eskiKayit = editingTxId ? supplierTx.find(t => t.id === editingTxId) : null;
     if (eskiKayit && eskiKayit.type === "borç" && txForm.type === "borç") {
-      const bagliToplam = supplierTx.filter(t => t.type === "ödeme" && t.faturaId === eskiKayit.id).reduce((s, t) => s + Number(t.amount || 0), 0);
+      const bagliToplam = supplierTx.filter(t => (t.type === "ödeme" || t.type === "mahsup") && t.faturaId === eskiKayit.id).reduce((s, t) => s + Number(t.amount || 0), 0);
       if (Number(txForm.amount) < bagliToplam - 0.001) {
         alert(`Bu faturaya zaten ${fmt(bagliToplam)} ödeme girilmiş; fatura tutarı bundan düşük olamaz. Önce fazla ödemeyi sil.`);
         return;
@@ -6025,10 +6026,10 @@ function SuppliersView({
   /* ---- Cari hareket listesi: faturalar (borç) ödeme durumuyla, faturaya
      bağlı olmayan genel ödemeler ayrıca ---- */
   const supTx = supplierTx.filter(t => t.supplierId === activeSupplier);
-  const faturaDurum = tedarikciFaturaDurumlari(supTx);
+  const { durum: faturaDurum, avansBakiye } = tedarikciFaturaDurumlari(supTx);
   const faturalar = supTx.filter(t => t.type === "borç");
   const faturaIds = new Set(faturalar.map(f => f.id));
-  const bagliOdemeler = supTx.filter(t => t.type === "ödeme" && t.faturaId && faturaIds.has(t.faturaId));
+  const bagliOdemeler = supTx.filter(t => (t.type === "ödeme" || t.type === "mahsup") && t.faturaId && faturaIds.has(t.faturaId));
   const genelOdemeler = supTx.filter(t => t.type === "ödeme" && !(t.faturaId && faturaIds.has(t.faturaId)));
   const listeKayitlari = [...faturalar, ...genelOdemeler].sort((a, b) => new Date(b.date) - new Date(a.date) || (a.type === "borç" ? 1 : -1));
   const toplamFatura = faturalar.reduce((s, f) => s + Number(f.amount || 0), 0);
@@ -6060,13 +6061,24 @@ function SuppliersView({
     });
     setOpenFaturaId(null);
   };
+  const avanstanDus = (f, tutar) => {
+    const d = faturaDurum.get(f.id) || { kalan: 0 };
+    const amt = Math.round(Number(tutar) * 100) / 100;
+    if (!(amt > 0)) return;
+    if (amt > d.kalan + 0.001 || amt > avansBakiye + 0.001) {
+      alert(`Düşülecek tutar en fazla ${fmt(Math.min(d.kalan, avansBakiye))} olabilir (faturanın kalanı ve kullanılmamış avans).`);
+      return;
+    }
+    addSupplierTx({ id: uid(), supplierId: f.supplierId, type: "mahsup", faturaId: f.id, date: todayStr(), amount: amt, description: `${f.description || "Fatura"} — avanstan düşüldü`, tags: [] });
+    setOpenFaturaId(null);
+  };
   const toggleFatura = f => {
     if (openFaturaId === f.id) {
       setOpenFaturaId(null);
       return;
     }
     const d = faturaDurum.get(f.id) || { kalan: 0 };
-    setSupPayForm({ date: todayStr(), amount: d.kalan > 0 ? String(d.kalan) : "", paymentMethod: supPayForm.paymentMethod, accountId: supPayForm.accountId || accounts[0]?.id || "" });
+    setSupPayForm({ date: todayStr(), amount: d.kalan > 0 ? String(d.kalan) : "", paymentMethod: supPayForm.paymentMethod, accountId: supPayForm.accountId || accounts[0]?.id || "", mahsupTutar: String(Math.min(d.kalan, avansBakiye)) });
     setOpenFaturaId(f.id);
   };
   // Eski alışkanlık: faturayı "Düzenle → Ödeme" yaparak kapatmak borcu silip
@@ -6083,11 +6095,12 @@ function SuppliersView({
   },
     React.createElement("span", null, "Toplam fatura: ", React.createElement("b", { className: "ecz-mono" }, fmt(toplamFatura))),
     React.createElement("span", null, "Ödenen: ", React.createElement("b", { className: "ecz-mono", style: { color: C.green } }, fmt(toplamOdenen))),
-    React.createElement("span", null, "Kalan borç: ", React.createElement("b", { className: "ecz-mono", style: { color: toplamFatura - toplamOdenen > 0 ? C.red : C.green } }, fmt(Math.max(0, toplamFatura - toplamOdenen))))
+    React.createElement("span", null, "Kalan borç: ", React.createElement("b", { className: "ecz-mono", style: { color: toplamFatura - toplamOdenen > 0 ? C.red : C.green } }, fmt(Math.max(0, toplamFatura - toplamOdenen)))),
+    avansBakiye > 0 ? React.createElement("span", { title: "Faturaya bağlanmamış ödemeler (ör. verilen avans çekleri). Bir faturanın durum düğmesine basıp 'Avanstan düş' ile o faturaya uygulayabilirsin." }, "Kullanılmamış avans / genel ödeme: ", React.createElement("b", { className: "ecz-mono", style: { color: C.ink } }, fmt(avansBakiye))) : null
   );
   const faturaSatiri = f => {
-    const d = faturaDurum.get(f.id) || { odenen: 0, kalan: Number(f.amount || 0), fifo: 0 };
-    const status = d.kalan <= 0.001 ? "odendi" : d.odenen + d.fifo > 0 ? "kismi" : "bekliyor";
+    const d = faturaDurum.get(f.id) || { odenen: 0, mahsup: 0, kalan: Number(f.amount || 0) };
+    const status = d.kalan <= 0.001 ? "odendi" : d.odenen + d.mahsup > 0 ? "kismi" : "bekliyor";
     const cfg = paymentBadgeStyle(status);
     const acik = openFaturaId === f.id;
     const buOdemeler = bagliOdemeler.filter(o => o.faturaId === f.id).sort((a, b) => String(a.date).localeCompare(String(b.date)));
@@ -6106,10 +6119,11 @@ function SuppliersView({
           }, React.createElement(cfg.Icon, { size: 12 }), " ", cfg.label, " ", acik ? React.createElement(ChevronUp, { size: 11 }) : React.createElement(ChevronDown, { size: 11 })),
           iconBtn(() => startEditTx(f), "Düzenle", Pencil),
           iconBtn(() => {
-            if (bagliOdemeler.some(o => o.faturaId === f.id)) {
+            if (bagliOdemeler.some(o => o.faturaId === f.id && o.type === "ödeme")) {
               alert("Bu faturaya bağlı ödeme var. Faturayı silmeden önce ödemelerini sil (durum düğmesine basınca listelenir).");
               return;
             }
+            bagliOdemeler.filter(o => o.faturaId === f.id && o.type === "mahsup").forEach(o => removeSupplierTx(o.id));
             removeSupplierTx(f.id);
           }, "Sil", Trash2)
         )
@@ -6118,10 +6132,15 @@ function SuppliersView({
       acik ? React.createElement("div", { className: "fadein", style: { background: C.paper, borderRadius: 10, padding: 12, margin: "0 0 10px", display: "flex", flexDirection: "column", gap: 8 } },
         buOdemeler.map(o => React.createElement("div", { key: o.id, style: { display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12.5 } },
           React.createElement("span", null, fmtDate(o.date), " · ", React.createElement("b", { className: "ecz-mono" }, fmt(o.amount)),
-            React.createElement("span", { style: { marginLeft: 6, fontSize: 10.5, fontWeight: 600, padding: "2px 7px", borderRadius: 20, background: o.accountId ? C.greenSoft : C.amberSoft, color: o.accountId ? C.green : C.amber } }, o.accountId ? `Hesaptan · ${accName(o.accountId)}` : "Elden")),
-          iconBtn(() => removeSupplierTx(o.id), "Ödemeyi sil", Trash2))),
-        d.fifo > 0 ? React.createElement("div", { style: { fontSize: 12, color: C.muted } }, "Faturaya bağlı olmayan genel ödemelerden kapanan: ", React.createElement("b", { className: "ecz-mono", style: { color: C.ink } }, fmt(d.fifo))) : null,
-        buOdemeler.length === 0 && d.fifo <= 0 ? React.createElement("div", { style: { fontSize: 12.5, color: C.muted } }, "Bu fatura için henüz ödeme yok.") : null,
+            o.type === "mahsup" ? React.createElement("span", { style: { marginLeft: 6, fontSize: 10.5, fontWeight: 600, padding: "2px 7px", borderRadius: 20, background: C.paperDark, color: C.ink } }, "Avanstan düşüldü") : React.createElement("span", { style: { marginLeft: 6, fontSize: 10.5, fontWeight: 600, padding: "2px 7px", borderRadius: 20, background: o.accountId ? C.greenSoft : C.amberSoft, color: o.accountId ? C.green : C.amber } }, o.accountId ? `Hesaptan · ${accName(o.accountId)}` : "Elden")),
+          iconBtn(() => removeSupplierTx(o.id), o.type === "mahsup" ? "Avans düşümünü geri al (fatura tekrar bekliyor olur)" : "Ödemeyi sil", Trash2))),
+        buOdemeler.length === 0 ? React.createElement("div", { style: { fontSize: 12.5, color: C.muted } }, "Bu fatura için henüz ödeme yok.") : null,
+        d.kalan > 0.001 && avansBakiye > 0.001 ? React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", background: C.card, borderRadius: 8, padding: "8px 10px" } },
+          React.createElement("span", { style: { fontSize: 12.5, color: C.ink, flex: "1 1 220px" } }, "Kullanılmamış avans / genel ödeme: ", React.createElement("b", { className: "ecz-mono" }, fmt(avansBakiye)), React.createElement("span", { style: { color: C.muted } }, " — Kasa'dan yeni para çıkmaz.")),
+          React.createElement(TutarInput, { style: { ...inputStyle, width: 130 }, value: supPayForm.mahsupTutar ?? "", onChange: e => setSupPayForm({ ...supPayForm, mahsupTutar: e.target.value }) }),
+          React.createElement("button", { type: "button", onClick: () => avanstanDus(f, supPayForm.mahsupTutar), style: { background: C.ink, color: C.paper, border: "none", borderRadius: 6, padding: "0 12px", height: 34, fontSize: 12.5, fontWeight: 600, cursor: "pointer" } }, "Avanstan düş")
+        ) : null,
+        d.kalan > 0.001 ? React.createElement("div", { style: { fontSize: 11.5, color: C.muted, marginTop: 2 } }, "Yeni ödeme (Kasa/Banka'dan çıkar):") : null,
         d.kalan > 0.001 ? React.createElement("form", {
           onSubmit: e => odemeEkle(e, f),
           style: { display: "grid", gridTemplateColumns: "130px 120px 110px 1fr auto", gap: 8, alignItems: "center" }
@@ -6141,7 +6160,7 @@ function SuppliersView({
   const genelOdemeSatiri = o => React.createElement("div", { key: o.id, style: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "9px 0", borderBottom: `1px solid ${C.paperDark}`, gap: 10 } },
     React.createElement("div", { style: { fontSize: 14 } }, o.description || "Ödeme", " ",
       React.createElement("span", { style: { color: C.muted, fontSize: 12 } }, "· ", fmtDate(o.date), o.accountId ? ` · ${accName(o.accountId)}` : " · Elden"),
-      React.createElement("span", { style: { marginLeft: 6, fontSize: 10.5, fontWeight: 600, padding: "2px 7px", borderRadius: 20, background: C.paperDark, color: C.muted } }, "Genel ödeme"),
+      React.createElement("span", { style: { marginLeft: 6, fontSize: 10.5, fontWeight: 600, padding: "2px 7px", borderRadius: 20, background: C.paperDark, color: C.muted } }, "Avans / genel ödeme"),
       React.createElement(TagBadges, { ids: o.tags, tags })),
     React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10 } },
       React.createElement("span", { className: "ecz-mono", style: { fontWeight: 600, fontSize: 14, color: C.green } }, "−", fmt(o.amount)),
@@ -11738,6 +11757,7 @@ function App() {
     // Tedarikçi borcu
     const supBalances = {};
     supplierTx.forEach(t => {
+      if (t.type === "mahsup") return;
       supBalances[t.supplierId] = (supBalances[t.supplierId] || 0) + (t.type === "borç" ? Number(t.amount) : -Number(t.amount));
     });
     const debtSuppliers = suppliers.filter(s => (supBalances[s.id] || 0) > 0);
